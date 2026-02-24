@@ -13,6 +13,7 @@ Run this script in elevated PowerShell/CMD with Python 3.10+.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 import re
@@ -25,7 +26,7 @@ import textwrap
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 BENCHMARK_PY = r'''
@@ -122,11 +123,48 @@ def run_windows_baseline(py_file: Path) -> BenchResult:
     )
 
 
-def powershell(ps_script: str) -> subprocess.CompletedProcess:
+def powershell(ps_script: str, check: bool = True) -> subprocess.CompletedProcess:
     ps_bin = shutil.which("powershell") or shutil.which("pwsh")
     if not ps_bin:
         raise RuntimeError("PowerShell not found. Install Windows PowerShell or PowerShell 7 (pwsh).")
-    return run([ps_bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+    return run([ps_bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script], check=check)
+
+
+def is_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def ensure_wsl_features() -> Tuple[bool, str]:
+    """Best-effort enable required Windows features. Returns (reboot_required, details)."""
+    ps = textwrap.dedent(
+        """
+        $ErrorActionPreference = 'Stop'
+        $features = @('Microsoft-Windows-Subsystem-Linux','VirtualMachinePlatform')
+        $reboot = $false
+        foreach ($f in $features) {
+          $state = (Get-WindowsOptionalFeature -Online -FeatureName $f).State
+          if ($state -ne 'Enabled') {
+            $res = Enable-WindowsOptionalFeature -Online -FeatureName $f -NoRestart -All
+            if ($res.RestartNeeded) { $reboot = $true }
+          }
+        }
+        $wslStatus = ''
+        try { $wslStatus = (wsl --status | Out-String) } catch {}
+        [PSCustomObject]@{ RebootRequired=$reboot; WslStatus=$wslStatus } | ConvertTo-Json -Compress
+        """
+    )
+    cp = powershell(ps, check=False)
+    if cp.returncode != 0:
+        msg = (cp.stderr or cp.stdout or "").strip()
+        return False, msg
+    try:
+        payload = json.loads(cp.stdout.strip().splitlines()[-1])
+        return bool(payload.get("RebootRequired", False)), str(payload.get("WslStatus", "")).strip()
+    except Exception:
+        return False, cp.stdout.strip()
 
 
 def wsl_available() -> bool:
@@ -144,9 +182,26 @@ def distro_installed(distro: str) -> bool:
 
 
 def ensure_wsl_ready_or_raise() -> None:
-    if not wsl_available():
+    if wsl_available():
+        return
+
+    if not is_admin():
         raise RuntimeError(
-            "WSL is not available. Enable WSL + Virtual Machine Platform and reboot, then re-run script."
+            "WSL is not available and auto-enable requires Administrator rights. "
+            "Run PowerShell/CMD as Administrator and re-run the script."
+        )
+
+    reboot_required, details = ensure_wsl_features()
+    if reboot_required:
+        raise RuntimeError(
+            "WSL features were enabled, but Windows reboot is required. Reboot and run script again."
+        )
+
+    if not wsl_available():
+        extra = f" Details: {details}" if details else ""
+        raise RuntimeError(
+            "WSL still unavailable after auto-enable attempt. Check virtualization in BIOS/UEFI and run `wsl --status`."
+            + extra
         )
 
 

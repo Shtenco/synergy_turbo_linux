@@ -37,6 +37,7 @@ python .\windows_vq_turbo_lab.py --mode wsl --distro Ubuntu --repo-win-path "C:\
 Если ранее падало на этапе `ensure_wsl_ubuntu` с `CalledProcessError`, новая версия скрипта теперь:
 
 - проверяет, доступен ли WSL (`wsl --status`),
+- пытается автоматически включить Windows features `Microsoft-Windows-Subsystem-Linux` и `VirtualMachinePlatform` (если запущено от администратора),
 - делает `wsl --set-default-version 2` в best-effort режиме,
 - устанавливает дистрибутив только если он реально отсутствует,
 - выводит более понятную причину ошибки (нет прав администратора / выключена virtualization в BIOS / требуется первичная инициализация WSL).
@@ -45,6 +46,6 @@ python .\windows_vq_turbo_lab.py --mode wsl --distro Ubuntu --repo-win-path "C:\
 
 1. Откройте PowerShell **от администратора**.
 2. Проверьте: `wsl --status` и `wsl -l -q`.
-3. Если WSL только что включили — выполните reboot.
+3. Если скрипт пишет, что включил features и нужен reboot — перезагрузите ПК.
 4. Один раз запустите `wsl` вручную, завершите first-run setup Ubuntu.
 5. Повторно запустите `windows_vq_turbo_lab.py`.
