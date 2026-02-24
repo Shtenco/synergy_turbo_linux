@@ -1,0 +1,176 @@
+Подключение
+IP Адрес	92.246.131.14
+Логин	root
+SSH-ключи	
+Linux Ubuntu
+Шаблон	Ubuntu 24.04.2 x64
+Инструкция по подключению
+Windows
+MacOS
+Linux
+PuTTY
+Нажмите клавиши Win + R, введите команду:
+cmd
+              
+и нажмите Enter.
+В открывшейся командной строке в Windows введите следующую команду:
+ssh -i <путь к файлу с ключом> root@<ip_address>
+              
+где root - имя пользователя на удаленном сервере, а <ip_address> - IP-адрес удаленного сервера.
+
+⚡ Шаг 1 — установить QEMU
+
+На Ubuntu / Debian:
+
+sudo apt update
+sudo apt install qemu-system-x86 qemu-utils -y
+
+На CentOS / Alma / Rocky:
+
+sudo dnf install qemu-kvm qemu-img -y
+📦 Шаг 2 — создать диск VM
+
+Например 20 GB:
+
+qemu-img create -f qcow2 vm.qcow2 20G
+💿 Шаг 3 — скачать ISO Linux
+
+Например Ubuntu Server:
+
+wget https://releases.ubuntu.com/24.04/ubuntu-24.04-live-server-amd64.iso
+
+(можешь любой дистрибутив)
+
+🚀 Шаг 4 — запустить VM (без KVM, чистый QEMU)
+
+Это работает даже на самом ограниченном VPS:
+
+qemu-system-x86_64 \
+  -m 2048 \
+  -smp 2 \
+  -drive file=vm.qcow2,format=qcow2 \
+  -cdrom ubuntu-24.04-live-server-amd64.iso \
+  -boot d \
+  -net nic -net user \
+  -nographic
+
+Что происходит:
+
+VM запускается в терминале
+
+установка через текстовый интерфейс
+
+сеть через user-mode NAT
+
+🌐 Доступ по SSH в VM
+
+Добавь port forward:
+
+-net user,hostfwd=tcp::2222-:22
+
+Полная команда:
+
+qemu-system-x86_64 \
+  -m 2048 \
+  -smp 2 \
+  -drive file=vm.qcow2,format=qcow2 \
+  -cdrom ubuntu-24.04-live-server-amd64.iso \
+  -boot d \
+  -net nic \
+  -net user,hostfwd=tcp::2222-:22 \
+  -nographic
+
+Потом:
+
+ssh user@localhost -p 2222
+🧠 После установки
+
+Запуск без ISO:
+
+qemu-system-x86_64 \
+  -m 2048 \
+  -smp 2 \
+  -drive file=vm.qcow2,format=qcow2 \
+  -net nic \
+  -net user,hostfwd=tcp::2222-:22 \
+  -nographic
+🚀 Если VPS поддерживает KVM (намного быстрее)
+
+Проверь:
+
+egrep -c '(vmx|svm)' /proc/cpuinfo
+
+Если > 0 — попробуй:
+
+qemu-system-x86_64 -enable-kvm ...
+
+Или:
+
+ls /dev/kvm
+🧪 Pro режим — kernel hacking lab
+
+Можно:
+
+запускать своё ядро через -kernel
+
+подключать initramfs
+
+делать snapshot
+
+тестировать патчи
+
+запускать fuzzing
+
+Пример:
+
+qemu-system-x86_64 \
+  -kernel bzImage \
+  -append "console=ttyS0" \
+  -nographic
+
+Так делают разработчики ядра Linux.
+
+⚠️ Реальность производительности
+
+Без KVM:
+
+примерно в 10–30 раз медленнее
+
+но для тестов и kernel experiments — норм
+
+🧨 Очень мощная схема (используют security researchers)
+
+QEMU + snapshot:
+
+-loadvm snapshot1
+
+Можно:
+
+откатывать систему за секунды
+
+тестировать эксплойты
+
+патчи ядра
+
+chaos testing
+
+💡 Если хочешь — могу показать:
+🔥 "Супер лабораторию" на VPS:
+
+QEMU
+
+кастом ядро
+
+автоматические снапшоты
+
+overlay диски
+
+быстрый rollback
+
+fuzzing setup
+
+сетевые эксперименты
+
+Это реально уровень kernel research.
+
+Напиши — сделать пошаговый гайд 🙂
