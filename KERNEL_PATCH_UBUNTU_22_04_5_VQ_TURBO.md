@@ -1,90 +1,65 @@
-# Kernel patch (Ubuntu 22.04.5 / Linux 5.15) — Virtual Qubit Cores + Turbo Scheduler
+# VQ Turbo kernel patch kit (Ubuntu 22.04.5 / Linux 5.15)
 
-> ⚠️ **Важно:** это инженерный/исследовательский патч для Linux scheduler layer.
-> Он не добавляет «настоящее квантовое железо», а добавляет **виртуальные кубитные ядра**
-> как новый класс планирования `SCHED_VQ_TURBO` и инфраструктуру рантайма в kernel-space.
+> Цель: **максимально ускорить** квантово-симуляционные/векторные пайплайны за счет
+> отдельного policy `SCHED_VQ_TURBO` и выделенного VQ runqueue на CPU.
 
-## Что входит
+## Что улучшено в этой версии
 
-- `virtual_qubit_turbo_5.15.patch` — unified diff для дерева Linux 5.15.
-- Новый scheduler class `vq_turbo_sched_class`.
-- Новый policy `SCHED_VQ_TURBO`.
-- Sysctl-интерфейс для управления:
-  - `kernel.vq_turbo_enabled`
-  - `kernel.vq_num_cores`
-  - `kernel.vq_timeslice_ns`
-  - `kernel.vq_boost_percent`
-- `/proc/vq_turbo` со статистикой.
+- Добавлен per-CPU `vq_rq` (очередь, счётчики, runtime clock).
+- Добавлен task-local state (`vq_run_list`, `vq_exec_ns`) вместо переиспользования чужих полей.
+- Добавлена инициализация в fork-path (`vq_turbo_task_fork`).
+- Добавлен более агрессивный и быстрый select CPU:
+  - выбор CPU с минимальной длиной VQ-очереди,
+  - ограничение VQ-«виртуальных кубитных ядер» через `kernel.vq_num_cores`.
+- Добавлен turbo preempt path по временному квантованию (`kernel.vq_timeslice_ns`) и boost-фактору.
 
-## Файлы, которые добавляются патчем
+## Артефакты
 
-- `include/linux/vq_turbo.h`
-- `kernel/sched/vq_turbo.c`
+- `virtual_qubit_turbo_5.15.patch` — RFC-patch для linux 5.15 tree.
+- `build_vq_turbo_kernel.sh` — apply/build/install script (+ `--dry-run`, `--llvm`).
 
-## Файлы, которые изменяются патчем
-
-- `include/uapi/linux/sched.h`
-- `include/linux/sched/prio.h`
-- `kernel/sched/Makefile`
-- `kernel/sched/Kconfig`
-- `kernel/sched/core.c`
-- `kernel/sysctl.c`
-- `fs/proc/base.c`
-
-## Быстрый сценарий применения на Ubuntu 22.04.5
+## Быстрый запуск
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential fakeroot libncurses-dev bison flex libssl-dev libelf-dev dwarves
+sudo apt install -y build-essential fakeroot libncurses-dev bison flex libssl-dev libelf-dev dwarves clang lld
 
-# 1) Получить kernel source Ubuntu 5.15
 apt source linux-image-unsigned-$(uname -r)
 cd linux-*/
 
-# 2) Скопировать patch
-cp /path/to/virtual_qubit_turbo_5.15.patch .
+# быстрый smoke-check патча
+/workspace/turbo_linux/build_vq_turbo_kernel.sh "$PWD" --dry-run
 
-# 3) Применить
-patch -p1 < virtual_qubit_turbo_5.15.patch
+# сборка (gcc)
+/workspace/turbo_linux/build_vq_turbo_kernel.sh "$PWD"
 
-# 4) Конфиг
-cp /boot/config-$(uname -r) .config
-yes "" | make oldconfig
-scripts/config --enable CONFIG_SCHED_VQ_TURBO
-
-# 5) Сборка (долго)
-make -j$(nproc)
-make -j$(nproc) modules
-sudo make modules_install
-sudo make install
-sudo update-grub
-sudo reboot
+# или сборка (clang/lld)
+/workspace/turbo_linux/build_vq_turbo_kernel.sh "$PWD" --llvm
 ```
 
-## Использование после загрузки ядра
+## Runtime tuning (агрессивный пресет)
 
 ```bash
-# Включение фичи
 sudo sysctl -w kernel.vq_turbo_enabled=1
-sudo sysctl -w kernel.vq_num_cores=8
-sudo sysctl -w kernel.vq_timeslice_ns=2000000
-sudo sysctl -w kernel.vq_boost_percent=35
+sudo sysctl -w kernel.vq_num_cores=12
+sudo sysctl -w kernel.vq_timeslice_ns=900000
+sudo sysctl -w kernel.vq_boost_percent=60
 
-# Проверка статистики
 cat /proc/vq_turbo
 ```
 
-## Пример API для userspace
+## Рекомендации для максимального ускорения
 
-Патч резервирует новый policy `SCHED_VQ_TURBO=8` и позволяет выставлять его через `sched_setscheduler()`:
+1. Изолировать VQ-core set через `isolcpus`, `nohz_full`, `rcu_nocbs` в GRUB.
+2. Для VQ workload использовать `taskset/cset` и не смешивать их с noisy background.
+3. Отключить deep C-states и держать high-performance governor.
+4. Сопоставить NUMA memory policy с CPU, где работают VQ-задачи.
+5. Валидировать профилем:
+   - `perf sched record/report`
+   - `trace-cmd record -e sched:*`
+   - latency tail p99/p999 на реальном workload.
 
-```c
-struct sched_param p = { .sched_priority = 0 };
-sched_setscheduler(0, SCHED_VQ_TURBO, &p);
-```
+## Важно
 
-## Ограничения
-
-- Привязка к ветке Linux 5.15 (Ubuntu 22.04 LTS). На других ветках потребуются rebase-правки.
-- Это экспериментальный scheduler path: перед production нужны soak-тесты, lockdep, perf/ftrace профилирование.
-- Не заменяет CFS/RT/Deadline, а добавляет отдельный policy для выбранных задач.
+- Это **экспериментальный RFC patch-set** (не upstream, не production-ready из коробки).
+- Требуется прогон compile+boot+stress на вашей целевой конфигурации железа.
