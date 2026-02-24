@@ -32,3 +32,24 @@ python orchestrator.py --config config.example.json
 - Для `.ppk` нужен `puttygen` в PATH.
 - Скрипт рассчитан на Ubuntu 24.04 VPS.
 - Перед запуском проверьте, что ключи доступа актуальны.
+
+
+## Windows ошибка `FileNotFoundError: [WinError 2]` на `puttygen`
+Если при запуске возникает ошибка, что не найден `puttygen`, значит у вас есть только `.ppk` ключ и не установлен PuTTY Generator.
+
+Решение:
+```powershell
+winget install PuTTY.PuTTY
+# или
+choco install putty
+```
+
+Проверьте:
+```powershell
+puttygen --help
+```
+
+После этого снова выполните:
+```powershell
+python orchestrator.py --config config.example.json
+```

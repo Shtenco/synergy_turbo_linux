@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import shutil
 import subprocess
 import tempfile
 import paramiko
@@ -13,18 +15,51 @@ class SSHSession:
         self.port = port
         self.key_path = key_path
         self.client: paramiko.SSHClient | None = None
+        self._temp_key_path: str | None = None
+
+    def _puttygen_binary(self) -> str | None:
+        candidates = ["puttygen", "puttygen.exe"]
+        for name in candidates:
+            path = shutil.which(name)
+            if path:
+                return path
+
+        if os.name == "nt":
+            win_candidates = [
+                r"C:\Program Files\PuTTY\puttygen.exe",
+                r"C:\Program Files (x86)\PuTTY\puttygen.exe",
+            ]
+            for path in win_candidates:
+                if Path(path).exists():
+                    return path
+        return None
 
     def _load_key(self):
-        raw = Path(self.key_path).read_text(encoding="utf-8", errors="ignore")
+        key_file = Path(self.key_path)
+        if not key_file.exists():
+            raise FileNotFoundError(f"SSH key not found: {self.key_path}")
+
+        raw = key_file.read_text(encoding="utf-8", errors="ignore")
         if raw.startswith("PuTTY-User-Key-File"):
+            puttygen = self._puttygen_binary()
+            if not puttygen:
+                raise RuntimeError(
+                    "PuTTY .ppk key detected, but puttygen is not installed or not in PATH. "
+                    "Install PuTTY and retry. Windows examples: 'winget install PuTTY.PuTTY' "
+                    "or 'choco install putty'."
+                )
+
             with tempfile.NamedTemporaryFile(delete=False, suffix=".key") as tmp:
-                tmp_path = tmp.name
+                self._temp_key_path = tmp.name
+
             subprocess.run(
-                ["puttygen", self.key_path, "-O", "private-openssh", "-o", tmp_path],
+                [puttygen, self.key_path, "-O", "private-openssh", "-o", self._temp_key_path],
                 check=True,
                 capture_output=True,
+                text=True,
             )
-            return paramiko.RSAKey.from_private_key_file(tmp_path)
+            return paramiko.RSAKey.from_private_key_file(self._temp_key_path)
+
         return paramiko.RSAKey.from_private_key_file(self.key_path)
 
     def connect(self) -> None:
@@ -49,3 +84,5 @@ class SSHSession:
     def close(self) -> None:
         if self.client:
             self.client.close()
+        if self._temp_key_path and Path(self._temp_key_path).exists():
+            Path(self._temp_key_path).unlink(missing_ok=True)
