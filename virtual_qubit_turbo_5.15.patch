@@ -1,0 +1,391 @@
+diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
+index b3f0e7d11111..b3f0e7d22222 100644
+--- a/include/uapi/linux/sched.h
++++ b/include/uapi/linux/sched.h
+@@ -115,6 +115,7 @@
+ #define SCHED_NORMAL			0
+ #define SCHED_FIFO			1
+ #define SCHED_RR			2
++#define SCHED_VQ_TURBO			8
+ #define SCHED_BATCH			3
+ #define SCHED_IDLE			5
+ #define SCHED_DEADLINE			6
+diff --git a/include/linux/sched/prio.h b/include/linux/sched/prio.h
+index 49a4b7c11111..49a4b7c22222 100644
+--- a/include/linux/sched/prio.h
++++ b/include/linux/sched/prio.h
+@@ -22,6 +22,8 @@
+ #define MAX_DL_PRIO		0
+ #define MAX_RT_PRIO		100
+ 
++#define MAX_VQ_PRIO		120
++
+ #define MAX_PRIO		(MAX_RT_PRIO + NICE_WIDTH)
+ #define DEFAULT_PRIO		(MAX_RT_PRIO + NICE_WIDTH / 2)
+ 
+diff --git a/include/linux/vq_turbo.h b/include/linux/vq_turbo.h
+new file mode 100644
+index 000000000000..111111111111
+--- /dev/null
++++ b/include/linux/vq_turbo.h
+@@ -0,0 +1,66 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_VQ_TURBO_H
++#define _LINUX_VQ_TURBO_H
++
++#include <linux/sched.h>
++#include <linux/types.h>
++
++struct vq_stats {
++	u64 enqueue_cnt;
++	u64 dequeue_cnt;
++	u64 pick_cnt;
++	u64 migrate_cnt;
++	u64 turbo_boost_hits;
++};
++
++extern int sysctl_vq_turbo_enabled;
++extern int sysctl_vq_num_cores;
++extern int sysctl_vq_boost_percent;
++extern int sysctl_vq_timeslice_ns;
++
++void vq_turbo_init(void);
++void vq_turbo_tick(struct rq *rq, struct task_struct *p, int queued);
++bool task_is_vq_turbo(struct task_struct *p);
++
++int proc_vq_turbo_init(void);
++
++#endif
++
+diff --git a/kernel/sched/Kconfig b/kernel/sched/Kconfig
+index 08c8f7a11111..08c8f7a22222 100644
+--- a/kernel/sched/Kconfig
++++ b/kernel/sched/Kconfig
+@@ -120,6 +120,16 @@ config SCHED_CORE
+ 
+ endchoice
+ 
++config SCHED_VQ_TURBO
++	bool "Virtual Qubit Turbo scheduling policy"
++	default y
++	help
++	  Adds an experimental scheduler policy SCHED_VQ_TURBO intended for
++	  virtual-qubit simulation workloads. Tasks with this policy are managed
++	  by a dedicated scheduler class that favors low-latency quantum-like
++	  vector stages and configurable turbo boosting.
++
++
+ config UCLAMP_TASK
+ 	bool "Enable utilization clamping for RT/FAIR tasks"
+ 	depends on CPU_FREQ_GOV_SCHEDUTIL
+diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
+index 866542a11111..866542a22222 100644
+--- a/kernel/sched/Makefile
++++ b/kernel/sched/Makefile
+@@ -29,3 +29,4 @@ obj-y += stats.o
+ obj-y += core_sched.o
+ obj-y += cpudeadline.o
+ obj-y += ext.o
++obj-$(CONFIG_SCHED_VQ_TURBO) += vq_turbo.o
+diff --git a/kernel/sched/vq_turbo.c b/kernel/sched/vq_turbo.c
+new file mode 100644
+index 000000000000..222222222222
+--- /dev/null
++++ b/kernel/sched/vq_turbo.c
+@@ -0,0 +1,301 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++#include <linux/sched.h>
++#include <linux/sched/clock.h>
++#include <linux/sched/topology.h>
++#include <linux/smp.h>
++#include <linux/spinlock.h>
++#include <linux/slab.h>
++#include <linux/sysctl.h>
++#include <linux/vq_turbo.h>
++
++int sysctl_vq_turbo_enabled = 1;
++int sysctl_vq_num_cores = 8;
++int sysctl_vq_boost_percent = 35;
++int sysctl_vq_timeslice_ns = 2000000;
++
++static struct vq_stats global_vq_stats;
++
++struct vq_rq {
++	struct list_head queue;
++	unsigned int nr_running;
++	u64 exec_clock;
++};
++
++static inline struct vq_rq *vq_rq_of(struct rq *rq)
++{
++	return (struct vq_rq *)&rq->cfs; /* placeholder storage for out-of-tree patch */
++}
++
++bool task_is_vq_turbo(struct task_struct *p)
++{
++	return p->policy == SCHED_VQ_TURBO;
++}
++
++static void enqueue_task_vq_turbo(struct rq *rq, struct task_struct *p, int flags)
++{
++	struct vq_rq *vrq = vq_rq_of(rq);
++
++	if (!sysctl_vq_turbo_enabled)
++		return;
++
++	if (list_empty(&p->se.group_node)) {
++		list_add_tail(&p->se.group_node, &vrq->queue);
++		vrq->nr_running++;
++		global_vq_stats.enqueue_cnt++;
++	}
++}
++
++static void dequeue_task_vq_turbo(struct rq *rq, struct task_struct *p, int flags)
++{
++	struct vq_rq *vrq = vq_rq_of(rq);
++
++	if (!list_empty(&p->se.group_node)) {
++		list_del_init(&p->se.group_node);
++		if (vrq->nr_running)
++			vrq->nr_running--;
++		global_vq_stats.dequeue_cnt++;
++	}
++}
++
++static struct task_struct *pick_next_task_vq_turbo(struct rq *rq)
++{
++	struct vq_rq *vrq = vq_rq_of(rq);
++	struct task_struct *p;
++
++	if (!sysctl_vq_turbo_enabled || !vrq->nr_running)
++		return NULL;
++
++	p = list_first_entry(&vrq->queue, struct task_struct, se.group_node);
++	global_vq_stats.pick_cnt++;
++	return p;
++}
++
++static void put_prev_task_vq_turbo(struct rq *rq, struct task_struct *p)
++{
++	/* round-robin within VQ class */
++	if (!list_empty(&p->se.group_node)) {
++		list_move_tail(&p->se.group_node, &vq_rq_of(rq)->queue);
++	}
++}
++
++static void task_tick_vq_turbo(struct rq *rq, struct task_struct *curr, int queued)
++{
++	u64 slice = (u64)sysctl_vq_timeslice_ns;
++
++	if (!task_is_vq_turbo(curr))
++		return;
++
++	vq_turbo_tick(rq, curr, queued);
++
++	if ((u64)curr->se.sum_exec_runtime > slice) {
++		resched_curr(rq);
++		curr->se.sum_exec_runtime = 0;
++	}
++}
++
++void vq_turbo_tick(struct rq *rq, struct task_struct *p, int queued)
++{
++	if (!sysctl_vq_turbo_enabled)
++		return;
++
++	/* simple synthetic turbo boost accounting */
++	if ((rq->clock_task & 0xF) < (u64)(sysctl_vq_boost_percent / 10))
++		global_vq_stats.turbo_boost_hits++;
++}
++
++static int select_task_rq_vq_turbo(struct task_struct *p, int cpu, int flags)
++{
++	int target = cpu;
++
++	if (sysctl_vq_num_cores > 0)
++		target = cpumask_any(cpu_online_mask);
++
++	if (target != cpu)
++		global_vq_stats.migrate_cnt++;
++
++	return target;
++}
++
++static void switched_to_vq_turbo(struct rq *rq, struct task_struct *p)
++{
++	if (task_on_rq_queued(p))
++		resched_curr(rq);
++}
++
++static unsigned int get_rr_interval_vq_turbo(struct rq *rq, struct task_struct *task)
++{
++	return nsecs_to_jiffies((u64)sysctl_vq_timeslice_ns);
++}
++
++DEFINE_SCHED_CLASS(vq_turbo) = {
++	.enqueue_task		= enqueue_task_vq_turbo,
++	.dequeue_task		= dequeue_task_vq_turbo,
++	.pick_next_task		= pick_next_task_vq_turbo,
++	.put_prev_task		= put_prev_task_vq_turbo,
++	.task_tick		= task_tick_vq_turbo,
++	.select_task_rq		= select_task_rq_vq_turbo,
++	.switched_to		= switched_to_vq_turbo,
++	.get_rr_interval		= get_rr_interval_vq_turbo,
++};
++
++static int vq_turbo_proc_show(struct seq_file *m, void *v)
++{
++	seq_printf(m, "enabled: %d\n", sysctl_vq_turbo_enabled);
++	seq_printf(m, "vq_num_cores: %d\n", sysctl_vq_num_cores);
++	seq_printf(m, "timeslice_ns: %d\n", sysctl_vq_timeslice_ns);
++	seq_printf(m, "boost_percent: %d\n", sysctl_vq_boost_percent);
++	seq_printf(m, "enqueue: %llu\n", global_vq_stats.enqueue_cnt);
++	seq_printf(m, "dequeue: %llu\n", global_vq_stats.dequeue_cnt);
++	seq_printf(m, "pick: %llu\n", global_vq_stats.pick_cnt);
++	seq_printf(m, "migrate: %llu\n", global_vq_stats.migrate_cnt);
++	seq_printf(m, "turbo_boost_hits: %llu\n", global_vq_stats.turbo_boost_hits);
++	return 0;
++}
++
++static int vq_turbo_proc_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, vq_turbo_proc_show, NULL);
++}
++
++static const struct proc_ops vq_turbo_proc_ops = {
++	.proc_open	= vq_turbo_proc_open,
++	.proc_read	= seq_read,
++	.proc_lseek	= seq_lseek,
++	.proc_release	= single_release,
++};
++
++int proc_vq_turbo_init(void)
++{
++	if (!proc_create("vq_turbo", 0444, NULL, &vq_turbo_proc_ops))
++		return -ENOMEM;
++	return 0;
++}
++
++void vq_turbo_init(void)
++{
++	memset(&global_vq_stats, 0, sizeof(global_vq_stats));
++	proc_vq_turbo_init();
++}
++
++static int __init vq_turbo_module_init(void)
++{
++	vq_turbo_init();
++	pr_info("VQ Turbo scheduler initialized\n");
++	return 0;
++}
++early_initcall(vq_turbo_module_init);
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 228f2a111111..228f2a222222 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -88,6 +88,7 @@
+ #include <linux/sched/deadline.h>
+ #include <linux/sched/rt.h>
+ #include <linux/sched/task.h>
++#include <linux/vq_turbo.h>
+ 
+ #include "sched.h"
+ 
+@@ -4639,6 +4640,10 @@ static void __sched notrace __schedule(unsigned int sched_mode)
+ 	if (sched_class_above(prev->sched_class, &fair_sched_class) &&
+ 	    rt_rq_is_runnable(&rq->rt))
+ 		next = pick_next_task_rt(rq, prev, &rf);
++	else if (prev->policy == SCHED_VQ_TURBO ||
++		     (sysctl_vq_turbo_enabled && likely(rq->nr_running)))
++		next = vq_turbo_sched_class.pick_next_task(rq);
++
+ 	if (!next)
+ 		next = pick_next_task_fair(rq, prev, &rf);
+@@ -7210,6 +7215,14 @@ int sched_setscheduler_nocheck(struct task_struct *p, int policy,
+ 		policy = SCHED_NORMAL;
+ 	}
+ 
++	if (policy == SCHED_VQ_TURBO) {
++		if (!sysctl_vq_turbo_enabled)
++			return -EPERM;
++		if (!IS_ENABLED(CONFIG_SCHED_VQ_TURBO))
++			return -EINVAL;
++		p->sched_class = &vq_turbo_sched_class;
++	}
++
+ 	return __sched_setscheduler(p, policy, param, true);
+ }
+diff --git a/kernel/sysctl.c b/kernel/sysctl.c
+index b10f0a111111..b10f0a222222 100644
+--- a/kernel/sysctl.c
++++ b/kernel/sysctl.c
+@@ -100,6 +100,7 @@
+ #include <linux/user_namespace.h>
+ #include <linux/watchdog.h>
+ #include <linux/cgroup.h>
++#include <linux/vq_turbo.h>
+ 
+ static const int six_hundred = 600;
+ static const int one_minute = 60 * HZ;
+@@ -1805,6 +1806,34 @@ static struct ctl_table kern_table[] = {
+ 		.proc_handler	= proc_dointvec,
+ 	},
++#ifdef CONFIG_SCHED_VQ_TURBO
++	{
++		.procname	= "vq_turbo_enabled",
++		.data		= &sysctl_vq_turbo_enabled,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= proc_dointvec,
++	},
++	{
++		.procname	= "vq_num_cores",
++		.data		= &sysctl_vq_num_cores,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= proc_dointvec_minmax,
++	},
++	{
++		.procname	= "vq_timeslice_ns",
++		.data		= &sysctl_vq_timeslice_ns,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= proc_dointvec_minmax,
++	},
++	{
++		.procname	= "vq_boost_percent",
++		.data		= &sysctl_vq_boost_percent,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= proc_dointvec_minmax,
++	},
++#endif
+ 	{ }
+ };
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index 1f22cc111111..1f22cc222222 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -98,6 +98,7 @@
+ #include <linux/psi.h>
+ #include <linux/oom.h>
+ #include <linux/ptrace.h>
++#include <linux/vq_turbo.h>
+ 
+ #include "internal.h"
+ 
+@@ -4178,6 +4179,10 @@ void __init proc_root_init(void)
+ 	proc_mkdir("sysvipc", NULL);
+ 	proc_mkdir("driver", NULL);
+ 
++#ifdef CONFIG_SCHED_VQ_TURBO
++	proc_vq_turbo_init();
++#endif
++
+ 	proc_self_init();
+ 	proc_setup_thread_self();
+ 	proc_sys_init();
