@@ -16,8 +16,8 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
-import statistics
 import subprocess
 import sys
 import tempfile
@@ -123,22 +123,61 @@ def run_windows_baseline(py_file: Path) -> BenchResult:
 
 
 def powershell(ps_script: str) -> subprocess.CompletedProcess:
-    return run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+    ps_bin = shutil.which("powershell") or shutil.which("pwsh")
+    if not ps_bin:
+        raise RuntimeError("PowerShell not found. Install Windows PowerShell or PowerShell 7 (pwsh).")
+    return run([ps_bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script])
+
+
+def wsl_available() -> bool:
+    try:
+        cp = run(["wsl", "--status"], check=False)
+        return cp.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
+def distro_installed(distro: str) -> bool:
+    cp = run(["wsl", "-l", "-q"], check=False)
+    lines = [ln.strip() for ln in cp.stdout.splitlines() if ln.strip()]
+    return distro.lower() in {ln.lower() for ln in lines}
+
+
+def ensure_wsl_ready_or_raise() -> None:
+    if not wsl_available():
+        raise RuntimeError(
+            "WSL is not available. Enable WSL + Virtual Machine Platform and reboot, then re-run script."
+        )
 
 
 def ensure_wsl_ubuntu(distro: str) -> None:
-    # Enable WSL + VirtualMachinePlatform if needed
+    ensure_wsl_ready_or_raise()
+
+    # On some systems this requires elevation/reboot; make it best-effort.
+    run(["wsl", "--set-default-version", "2"], check=False)
+
+    if distro_installed(distro):
+        return
+
     ps = textwrap.dedent(
         f"""
         $ErrorActionPreference = 'Stop'
-        wsl --set-default-version 2 | Out-Null
-        $distros = wsl -l -q
-        if ($distros -notmatch '^{re.escape(distro)}$') {{
-            wsl --install -d {distro}
-        }}
+        wsl --install -d {distro}
         """
     )
-    powershell(ps)
+    try:
+        powershell(ps)
+    except subprocess.CalledProcessError as exc:
+        msg = (exc.stderr or exc.stdout or "").strip()
+        raise RuntimeError(
+            "WSL distro installation failed. Run terminal as Administrator and ensure virtualization is enabled in BIOS. "
+            f"Original error: {msg}"
+        ) from exc
+
+    if not distro_installed(distro):
+        raise RuntimeError(
+            f"Distro '{distro}' was not detected after install. Open 'wsl' once manually to complete first-run setup, then rerun."
+        )
 
 
 def wsl_exec(command: str, distro: str) -> subprocess.CompletedProcess:
@@ -146,19 +185,22 @@ def wsl_exec(command: str, distro: str) -> subprocess.CompletedProcess:
 
 
 def run_wsl_benchmark(py_file: Path, distro: str, repo_win_path: Optional[str]) -> BenchResult:
-    wsl_exec("sudo apt-get update -y", distro)
-    wsl_exec("sudo apt-get install -y python3 python3-pip build-essential git", distro)
+    try:
+        wsl_exec("sudo apt-get update -y", distro)
+        wsl_exec("sudo apt-get install -y python3 python3-pip build-essential git", distro)
+    except subprocess.CalledProcessError as exc:
+        msg = (exc.stderr or exc.stdout or "").strip()
+        raise RuntimeError(f"Failed preparing Ubuntu in WSL. Error: {msg}") from exc
 
-    win_path_escaped = str(py_file).replace("\\", "\\\\")
+    win_path_escaped = shlex.quote(str(py_file))
     wsl_bench_path = "/tmp/vq_turbo_bench.py"
-    wsl_exec(f"cp \"$(wslpath '{win_path_escaped}')\" {wsl_bench_path}", distro)
+    wsl_exec(f"cp \"$(wslpath {win_path_escaped})\" {wsl_bench_path}", distro)
 
     if repo_win_path:
-        repo_win_path = repo_win_path.replace("\\", "\\\\")
-        wsl_repo = "$(wslpath '" + repo_win_path + "')"
+        wsl_repo = "$(wslpath " + shlex.quote(repo_win_path) + ")"
         # best-effort dependencies for kernel build flow
+        wsl_exec(f"cd {wsl_repo} && chmod +x build_vq_turbo_kernel.sh || true", distro)
         wsl_exec(
-            f"cd {wsl_repo} && chmod +x build_vq_turbo_kernel.sh || true && "
             "sudo apt-get install -y fakeroot libncurses-dev bison flex libssl-dev libelf-dev dwarves clang lld",
             distro,
         )
@@ -211,8 +253,12 @@ def main() -> int:
     baseline = run_windows_baseline(bench_file)
 
     if args.mode == "wsl":
-        ensure_wsl_ubuntu(args.distro)
-        guest = run_wsl_benchmark(bench_file, args.distro, args.repo_win_path or None)
+        try:
+            ensure_wsl_ubuntu(args.distro)
+            guest = run_wsl_benchmark(bench_file, args.distro, args.repo_win_path or None)
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     else:
         hyperv_not_implemented(args.hyperv_vm_name)
         return 2
