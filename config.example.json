@@ -1,0 +1,17 @@
+{
+  "vps": {
+    "host": "92.246.131.14",
+    "user": "root",
+    "port": 22,
+    "private_key": "Linux Ubuntu.ppk"
+  },
+  "experiment": {
+    "vm_name": "turbo-bench",
+    "vm_ram_mb": 2048,
+    "vm_vcpus": 2,
+    "baseline_profile": "linux-2gb-2cpu",
+    "patched_profile": "turbo-kvm-patched"
+  },
+  "patch_file": "virtual_qubit_turbo_5.15.patch",
+  "results_dir": "results"
+}
