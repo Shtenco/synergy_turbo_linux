@@ -1,0 +1,28 @@
+name: TURBO Core benchmark
+
+on:
+  push:
+    paths:
+      - "turbo_core/**"
+      - ".github/workflows/turbo-core-benchmark.yml"
+  pull_request:
+    paths:
+      - "turbo_core/**"
+      - ".github/workflows/turbo-core-benchmark.yml"
+
+jobs:
+  build-test-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and self-test
+        working-directory: turbo_core
+        run: make test
+      - name: Collect non-gating benchmark
+        working-directory: turbo_core
+        run: make bench
+      - name: Upload benchmark JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbo-core-benchmark-${{ github.sha }}
+          path: turbo_core/results/*.json
