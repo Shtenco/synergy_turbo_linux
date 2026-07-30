@@ -1,3 +1,15 @@
+# TURBO Core development
+
+The active clean-room kernel work now lives in [`turbo_core/`](turbo_core/).
+It contains x86_64 fast paths, a capability primitive, bounded IPC, an O(1)
+priority scheduler, freestanding compilation checks, correctness tests and a
+reproducible cycle benchmark. The legacy Linux/VPS experiment remains below as
+historical infrastructure and a future remote hardware-lab runner.
+
+> Performance rule: no uplift claim is accepted unless the exact artifact is
+> built, identified, executed, compared against a matched baseline, repeated,
+> and published with raw samples and environment metadata.
+
 # Turbo Linux Rebuild (Windows Orchestrator → VPS → KVM)
 
 Проект пересобран с нуля под единый сценарий: **Windows Python оркестратор** подключается к VPS по SSH-ключу, готовит KVM окружение, применяет patch к kernel source и считает прирост производительности относительно baseline Linux профиля (2 GB RAM / 2 vCPU).
