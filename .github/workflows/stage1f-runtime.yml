@@ -1,0 +1,66 @@
+name: TURBO Stage-1F Runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'stage1f/**'
+      - '.github/workflows/stage1f-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qemu-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - name: Install trusted toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 build-essential binutils python3 ca-certificates
+          qemu-system-x86_64 --version
+
+      - name: Reconstruct Stage-1E source capsule
+        run: |
+          set -euo pipefail
+          mkdir -p stage1f/work
+          cat stage1f/runtime-src.part.* | base64 -d > /tmp/stage1e-runtime-src.tar.gz
+          test "$(stat -c %s /tmp/stage1e-runtime-src.tar.gz)" = "81698"
+          echo "40347dc2a3cd10dc3a51fcadf2967c96e1c48f760611ec73116e3c127c08a490  /tmp/stage1e-runtime-src.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/stage1e-runtime-src.tar.gz -C stage1f/work
+
+      - name: Strict build and host validation
+        working-directory: stage1f/work
+        run: |
+          set -euo pipefail
+          make clean
+          make test
+          make sanitize
+          make kernel
+          make audit
+          make personality-test
+
+      - name: Real 4-vCPU QEMU runtime
+        working-directory: stage1f/work
+        run: |
+          set -euo pipefail
+          make qemu-test
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbo-stage1f-runtime-evidence
+          if-no-files-found: warn
+          path: |
+            stage1f/work/build/qemu-stage1e.log
+            stage1f/work/build/turbo-kernel.elf
+            stage1f/work/build/turbo-vfs.elf
+            stage1f/work/build/turbo-linux-smoke.elf
+            stage1f/work/build/*.txt
