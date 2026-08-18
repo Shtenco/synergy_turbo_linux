@@ -1,0 +1,126 @@
+name: TURBO v37 Runtime Environment Probe
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/v37-runtime-probe.yml'
+      - 'v37-runtime/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install QEMU/KVM probe tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cpu-checker
+          qemu-system-x86_64 --version
+
+      - name: Probe host virtualization boundary
+        id: probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-evidence
+          {
+            echo '=== uname ==='
+            uname -a
+            echo '=== qemu ==='
+            qemu-system-x86_64 --version
+            echo '=== accelerators ==='
+            qemu-system-x86_64 -accel help
+            echo '=== cpu virtualization flags ==='
+            grep -m1 -E '^(flags|Features)' /proc/cpuinfo || true
+            echo '=== /dev/kvm ==='
+            ls -l /dev/kvm 2>&1 || true
+            echo '=== kvm-ok ==='
+            kvm-ok 2>&1 || true
+            echo '=== nested Intel ==='
+            cat /sys/module/kvm_intel/parameters/nested 2>&1 || true
+            echo '=== nested AMD ==='
+            cat /sys/module/kvm_amd/parameters/nested 2>&1 || true
+          } | tee runtime-evidence/environment.txt
+
+          python3 - <<'PY' | tee runtime-evidence/status.json
+          import json, pathlib, re, subprocess
+          text=pathlib.Path('runtime-evidence/environment.txt').read_text(errors='replace')
+          flags=''
+          for line in pathlib.Path('/proc/cpuinfo').read_text(errors='ignore').splitlines():
+              if line.startswith(('flags','Features')) and ':' in line:
+                  flags=line.split(':',1)[1].strip().split(); break
+          def read(path):
+              try: return pathlib.Path(path).read_text().strip().lower()
+              except OSError: return None
+          has_kvm=pathlib.Path('/dev/kvm').exists()
+          intel_nested=read('/sys/module/kvm_intel/parameters/nested')
+          amd_nested=read('/sys/module/kvm_amd/parameters/nested')
+          data={
+              'schema':'turbo.github-runtime-probe.v37',
+              'dev_kvm':has_kvm,
+              'host_vmx':'vmx' in flags,
+              'host_svm':'svm' in flags,
+              'nested_intel':intel_nested,
+              'nested_amd':amd_nested,
+              'qemu_tcg_available':True,
+              'kvm_nested_intel_candidate': bool(has_kvm and 'vmx' in flags and intel_nested in {'y','1','yes'}),
+              'kvm_nested_amd_candidate': bool(has_kvm and 'svm' in flags and amd_nested in {'y','1','yes'}),
+          }
+          print(json.dumps(data, indent=2, sort_keys=True))
+          PY
+
+      - name: Smoke KVM initialization when exposed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e /dev/kvm ]]; then
+            sudo chmod a+rw /dev/kvm || true
+            set +e
+            timeout 3s qemu-system-x86_64 \
+              -machine q35,accel=kvm -cpu host -m 128M -smp 2 \
+              -nodefaults -no-user-config -display none -monitor none -serial none -S \
+              2>runtime-evidence/kvm-smoke.stderr
+            rc=$?
+            set -e
+            echo "$rc" > runtime-evidence/kvm-smoke.rc
+            cat runtime-evidence/kvm-smoke.stderr || true
+            # timeout=124 means QEMU initialized and sat paused as expected.
+            if [[ $rc -eq 124 ]]; then
+              echo 'TURBO_V37_GITHUB_KVM_INIT_PASS' | tee runtime-evidence/kvm-marker.txt
+            else
+              echo 'TURBO_V37_GITHUB_KVM_INIT_NOT_AVAILABLE' | tee runtime-evidence/kvm-marker.txt
+            fi
+          else
+            echo 'TURBO_V37_GITHUB_KVM_DEVICE_MISSING' | tee runtime-evidence/kvm-marker.txt
+          fi
+
+      - name: Record decision
+        shell: bash
+        run: |
+          python3 - <<'PY' | tee runtime-evidence/decision.txt
+          import json
+          d=json.load(open('runtime-evidence/status.json'))
+          if d['kvm_nested_intel_candidate']:
+              print('TURBO_V37_GITHUB_RUNTIME_PATH=KVM_INTEL_CANDIDATE')
+          elif d['kvm_nested_amd_candidate']:
+              print('TURBO_V37_GITHUB_RUNTIME_PATH=KVM_AMD_CANDIDATE')
+          else:
+              print('TURBO_V37_GITHUB_RUNTIME_PATH=TCG_NATIVE_ONLY_SELF_HOSTED_REQUIRED_FOR_NESTED_VIRT')
+          PY
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbo-v37-github-runtime-probe
+          if-no-files-found: error
+          path: runtime-evidence/
