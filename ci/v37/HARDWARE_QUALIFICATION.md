@@ -1,10 +1,10 @@
 # TURBO META OS v37 — hardware runtime qualification
 
-This directory documents the fail-closed GitHub Actions boundary for the first real nested Linux boot.
+This directory defines the fail-closed boundary for the first real nested Linux boot on Intel VMX/EPT and AMD SVM/NPT.
 
 ## Exact input
 
-The self-hosted runner must contain the exact FULL v37 archive at:
+The self-hosted runner or local qualification host must contain the exact FULL v37 archive:
 
 `/opt/turbo/TURBO_META_OS_v37_RUNTIME_QUALIFICATION_RC_FULL.zip`
 
@@ -12,9 +12,38 @@ Required SHA-256:
 
 `5f14f0259699472d90735e7d973e30e060f265ae14f7a58ecd419eca972f6faf`
 
-The workflow verifies this SHA before extraction and then verifies the archive's `MANIFEST.sha256` before building anything.
+Before any build or VM entry, `run_local_qualification.sh` verifies both this outer SHA and the archive's `MANIFEST.sha256`.
 
-## Runner labels
+## One-command local qualification
+
+From a checkout of this PR branch on the hardware host:
+
+```bash
+bash ci/v37/run_local_qualification.sh \
+  /opt/turbo/TURBO_META_OS_v37_RUNTIME_QUALIFICATION_RC_FULL.zip \
+  auto 180
+```
+
+`auto` selects Intel when `vmx` is exposed and AMD when `svm` is exposed. Explicit backends are `intel` and `amd`.
+
+The script performs, in order:
+
+1. exact archive SHA verification;
+2. `/dev/kvm` read/write and CPU virtualization preflight;
+3. nested virtualization verification;
+4. bounded QEMU/KVM initialization smoke test;
+5. full source `MANIFEST.sha256` verification;
+6. deterministic `make test`;
+7. ASan/UBSan `make sanitize`;
+8. hardened `make audit`;
+9. fresh qemu-loader/block-device build;
+10. strict `runtime_qualify_v37.py` hardware run;
+11. serial marker and negative-failure-marker validation;
+12. machine-readable evidence + `SHA256SUMS` export.
+
+Default evidence directories are `v37-runtime-evidence-intel/` or `v37-runtime-evidence-amd/` next to the caller's checkout. Override with `TURBO_V37_EVIDENCE_OUT`.
+
+## GitHub self-hosted runner labels
 
 Intel runner:
 
@@ -30,37 +59,48 @@ AMD runner:
 - `x64`
 - `turbo-amd`
 
+The GitHub workflow calls the same local qualification script, so local and Actions semantics cannot silently diverge.
+
 ## Intel requirements
 
-- `/dev/kvm` is a character device.
-- host CPU exposes `vmx`.
-- `/sys/module/kvm_intel/parameters/nested` is `Y` or `1`.
-- `qemu-system-x86_64` is installed.
+- Linux x86-64 host;
+- `/dev/kvm` character device, readable/writable by the runner account;
+- CPU exposes `vmx`;
+- `kvm_intel` loaded;
+- `/sys/module/kvm_intel/parameters/nested` is `Y` or `1`;
+- `qemu-system-x86_64`, `make`, `python3`, `unzip`, `sha256sum`, and `timeout` available.
 
-The job uses `scripts/runtime_qualify_v37.py --mode kvm-intel --strict` and cannot PASS unless all of the following are observed:
+PASS additionally requires the real runtime markers:
 
 - `TURBO_V37_LINUX_GUEST_BOOT_PASS`
 - `TURBO_V37_NATIVE_PLUS_LINUX_BOOT_OBSERVED`
-- Intel VMX/EPT availability marker
-- no TURBO panic/exception/VM-entry-failure marker
+- `TURBO_V37_VMX_RUNTIME_AVAILABLE`
 
 ## AMD requirements
 
-- `/dev/kvm` is a character device.
-- host CPU exposes `svm`.
-- `/sys/module/kvm_amd/parameters/nested` is `Y` or `1`.
-- `qemu-system-x86_64` is installed.
+- Linux x86-64 host;
+- `/dev/kvm` character device, readable/writable by the runner account;
+- CPU exposes `svm`;
+- `kvm_amd` loaded;
+- `/sys/module/kvm_amd/parameters/nested` is `Y` or `1`;
+- the same toolchain requirements as Intel.
 
-The job uses `scripts/runtime_qualify_v37.py --mode kvm-amd --strict` and has the same Linux/native marker requirements plus the AMD SVM/NPT availability marker.
+PASS additionally requires:
 
-## Why hosted GitHub Actions is separate
+- `TURBO_V37_LINUX_GUEST_BOOT_PASS`
+- `TURBO_V37_NATIVE_PLUS_LINUX_BOOT_OBSERVED`
+- `TURBO_V37_SVM_RUNTIME_AVAILABLE`
 
-The repository's `ubuntu-latest`/`ubuntu-24.04` jobs currently fail before their first step is allocated. A one-line `echo` smoke test reproduces the same zero-step failure, so this is currently a runner/account allocation boundary rather than a TURBO/QEMU failure.
+## Negative evidence is fatal
 
-When hosted Actions allocation is restored, the hosted job should be used for QEMU-TCG native qualification. Nested VMX/SVM qualification remains deliberately separate and belongs on labeled physical/self-hosted runners unless the hosted runner explicitly exposes `/dev/kvm` plus nested virtualization.
+Any TURBO panic/exception, VMX/SVM entry failure, missing marker, KVM initialization failure, stale source manifest, incorrect archive SHA, disabled nested virtualization, or runtime JSON result other than `PASS` terminates qualification.
 
-## PASS semantics
+Build success alone is never runtime success.
 
-Build success is not runtime success. A hardware job is PASS only when the runtime JSON reports `result=PASS`, `linux_boot_marker_observed=true`, and `native_parallel_observed=true`.
+## Hosted GitHub Actions status
 
-A missing runner, missing KVM, disabled nested virtualization, missing marker, unknown VM-exit, entry failure, or guest panic must never be converted to PASS.
+On 2026-08-21 the repository's `ubuntu-latest` and `ubuntu-24.04` jobs were rechecked. Even a one-step `echo` smoke workflow failed before its first step was allocated (`steps=[]`). The QEMU environment probe behaves identically. Therefore this is currently a GitHub-hosted runner/account allocation boundary, not a TURBO or QEMU runtime failure.
+
+Those hosted probe workflows are now `workflow_dispatch` only so this external outage does not create red checks on every PR commit. Once hosted allocation is restored, they can be run manually to qualify QEMU-TCG and discover whether `/dev/kvm`/nested virtualization are exposed.
+
+Nested Intel/AMD proof remains deliberately assigned to labeled self-hosted hardware unless a hosted runner explicitly proves equivalent KVM/nested capabilities.
