@@ -1,0 +1,17 @@
+name: TURBO v37 Runner Allocation Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prove runner executed a step
+        run: |
+          echo TURBO_V37_GITHUB_RUNNER_STEP_EXECUTED
+          uname -a

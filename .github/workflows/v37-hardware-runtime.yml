@@ -1,0 +1,71 @@
+name: TURBO v37 Hardware Runtime Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_path:
+        description: Absolute path to exact v37 FULL ZIP preloaded on the self-hosted runner
+        required: true
+        default: /opt/turbo/TURBO_META_OS_v37_RUNTIME_QUALIFICATION_RC_FULL.zip
+      timeout_seconds:
+        description: Runtime qualification timeout per backend
+        required: true
+        default: '180'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: turbo-v37-hardware-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  intel-vmx:
+    name: Intel VMX/EPT + Linux guest
+    runs-on: [self-hosted, linux, x64, turbo-intel]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout qualification definitions
+        uses: actions/checkout@v4
+
+      - name: Run exact fail-closed Intel qualification
+        shell: bash
+        env:
+          TURBO_V37_EVIDENCE_OUT: ${{ runner.temp }}/v37-runtime-evidence-intel
+        run: |
+          set -euo pipefail
+          bash ci/v37/run_local_qualification.sh \
+            '${{ inputs.archive_path }}' intel '${{ inputs.timeout_seconds }}'
+
+      - name: Upload Intel runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbo-v37-intel-vmx-runtime-evidence
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/v37-runtime-evidence-intel/
+
+  amd-svm:
+    name: AMD SVM/NPT + Linux guest
+    runs-on: [self-hosted, linux, x64, turbo-amd]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout qualification definitions
+        uses: actions/checkout@v4
+
+      - name: Run exact fail-closed AMD qualification
+        shell: bash
+        env:
+          TURBO_V37_EVIDENCE_OUT: ${{ runner.temp }}/v37-runtime-evidence-amd
+        run: |
+          set -euo pipefail
+          bash ci/v37/run_local_qualification.sh \
+            '${{ inputs.archive_path }}' amd '${{ inputs.timeout_seconds }}'
+
+      - name: Upload AMD runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turbo-v37-amd-svm-runtime-evidence
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/v37-runtime-evidence-amd/
