@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ORIG_PWD="$PWD"
 ARCHIVE="${1:-/opt/turbo/TURBO_META_OS_v37_RUNTIME_QUALIFICATION_RC_FULL.zip}"
 BACKEND="${2:-auto}"
 TIMEOUT_SECONDS="${3:-180}"
@@ -14,6 +15,7 @@ need unzip
 need python3
 need make
 need qemu-system-x86_64
+need timeout
 
 test -f "$ARCHIVE" || fail "archive_missing:$ARCHIVE"
 echo "$EXPECTED_SHA  $ARCHIVE" | sha256sum -c - >/dev/null || fail archive_sha256_mismatch
@@ -51,6 +53,7 @@ case "$BACKEND" in
   *) fail "invalid_backend:$BACKEND" ;;
 esac
 
+EVIDENCE_OUT="${TURBO_V37_EVIDENCE_OUT:-$ORIG_PWD/v37-runtime-evidence-${BACKEND}}"
 WORK="${TURBO_V37_WORK:-$(mktemp -d -t turbo-v37-qualify.XXXXXX)}"
 KEEP_WORK="${TURBO_V37_KEEP_WORK:-0}"
 cleanup() {
@@ -117,7 +120,7 @@ assert d.get('native_parallel_observed') is True, d
 print('TURBO_V37_RUNTIME_JSON_PASS')
 PY
 
-EVIDENCE_OUT="${TURBO_V37_EVIDENCE_OUT:-$PWD/v37-runtime-evidence-${BACKEND}}"
+rm -rf "$EVIDENCE_OUT"
 mkdir -p "$EVIDENCE_OUT"
 cp -f "$STATUS" "$EVIDENCE_OUT/runtime-status.json"
 cp -f "$LOG" "$EVIDENCE_OUT/runtime.log"
