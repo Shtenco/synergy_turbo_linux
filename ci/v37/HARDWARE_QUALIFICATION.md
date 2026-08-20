@@ -74,7 +74,7 @@ PASS additionally requires the real runtime markers:
 
 - `TURBO_V37_LINUX_GUEST_BOOT_PASS`
 - `TURBO_V37_NATIVE_PLUS_LINUX_BOOT_OBSERVED`
-- `TURBO_V37_VMX_RUNTIME_AVAILABLE`
+- `TURBO_V37_VMX_EPT_AVAILABLE`
 
 ## AMD requirements
 
@@ -89,11 +89,11 @@ PASS additionally requires:
 
 - `TURBO_V37_LINUX_GUEST_BOOT_PASS`
 - `TURBO_V37_NATIVE_PLUS_LINUX_BOOT_OBSERVED`
-- `TURBO_V37_SVM_RUNTIME_AVAILABLE`
+- `TURBO_V37_SVM_NPT_AVAILABLE`
 
 ## Negative evidence is fatal
 
-Any TURBO panic/exception, VMX/SVM entry failure, missing marker, KVM initialization failure, stale source manifest, incorrect archive SHA, disabled nested virtualization, or runtime JSON result other than `PASS` terminates qualification.
+Any `[TURBO PANIC]`, `[TURBO EXCEPTION]`, VMX/SVM entry failure, missing marker, KVM initialization failure, stale source manifest, incorrect archive SHA, disabled nested virtualization, or runtime JSON result other than `PASS` terminates qualification.
 
 Build success alone is never runtime success.
 
