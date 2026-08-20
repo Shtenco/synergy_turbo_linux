@@ -1,10 +1,6 @@
 name: TURBO v37 Runner Allocation Smoke
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/v37-runner-smoke.yml'
   workflow_dispatch:
 
 permissions:
