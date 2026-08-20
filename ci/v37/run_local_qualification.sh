@@ -56,15 +56,61 @@ esac
 EVIDENCE_OUT="${TURBO_V37_EVIDENCE_OUT:-$ORIG_PWD/v37-runtime-evidence-${BACKEND}}"
 WORK="${TURBO_V37_WORK:-$(mktemp -d -t turbo-v37-qualify.XXXXXX)}"
 KEEP_WORK="${TURBO_V37_KEEP_WORK:-0}"
-cleanup() {
-  if [[ "$KEEP_WORK" != 1 ]]; then rm -rf "$WORK"; fi
-}
-trap cleanup EXIT
-
 SRC="$WORK/source"
 BUILD="$WORK/build"
 STATUS="$WORK/runtime-status.json"
 mkdir -p "$SRC" "$BUILD"
+rm -rf "$EVIDENCE_OUT"
+mkdir -p "$EVIDENCE_OUT"
+
+finalize() {
+  rc=$?
+  trap - EXIT
+  set +e
+
+  printf '%s\n' "$rc" > "$EVIDENCE_OUT/qualification-exit-code.txt"
+  [[ -f "$WORK/host-preflight.txt" ]] && cp -f "$WORK/host-preflight.txt" "$EVIDENCE_OUT/host-preflight.txt"
+  [[ -f "$WORK/kvm-preflight.stderr" ]] && cp -f "$WORK/kvm-preflight.stderr" "$EVIDENCE_OUT/kvm-preflight.stderr"
+  [[ -f "$STATUS" ]] && cp -f "$STATUS" "$EVIDENCE_OUT/runtime-status.json"
+
+  if [[ -d "$BUILD" ]]; then
+    for f in "$BUILD"/runtime-v37-*.log; do
+      [[ -f "$f" ]] && cp -f "$f" "$EVIDENCE_OUT/$(basename "$f")"
+    done
+    [[ -f "$BUILD/runtime-v37-${MODE}.log" ]] && cp -f "$BUILD/runtime-v37-${MODE}.log" "$EVIDENCE_OUT/runtime.log"
+    for f in turbo-kernel.elf turbo-vmm.elf turbo-block-device.img turbo-qemu-loader.elf; do
+      [[ -f "$BUILD/$f" ]] && cp -f "$BUILD/$f" "$EVIDENCE_OUT/$f"
+    done
+  fi
+
+  (
+    cd "$EVIDENCE_OUT" || exit 0
+    rm -f SHA256SUMS
+    find . -maxdepth 1 -type f -printf '%P\n' | LC_ALL=C sort | while IFS= read -r f; do
+      [[ -n "$f" && "$f" != SHA256SUMS ]] && sha256sum "$f"
+    done > SHA256SUMS
+  )
+
+  if [[ "$KEEP_WORK" != 1 ]]; then rm -rf "$WORK"; fi
+  exit "$rc"
+}
+trap finalize EXIT
+
+{
+  echo "backend=$BACKEND"
+  echo "mode=$MODE"
+  echo "archive=$ARCHIVE"
+  echo "archive_sha256=$EXPECTED_SHA"
+  uname -a
+  qemu-system-x86_64 --version | head -n1
+  ls -l /dev/kvm
+  echo "cpu_virtualization_flags=$(grep -oE '\b(vmx|svm)\b' <<<"$FLAGS" | tr '\n' ' ')"
+  if [[ "$BACKEND" == intel ]]; then
+    printf 'nested='; cat /sys/module/kvm_intel/parameters/nested
+  else
+    printf 'nested='; cat /sys/module/kvm_amd/parameters/nested
+  fi
+} > "$WORK/host-preflight.txt" 2>&1
 
 unzip -q "$ARCHIVE" -d "$SRC"
 ROOT="$(find "$SRC" -mindepth 1 -maxdepth 1 -type d | head -n1)"
@@ -121,18 +167,5 @@ assert d.get('linux_boot_marker_observed') is True, d
 assert d.get('native_parallel_observed') is True, d
 print('TURBO_V37_RUNTIME_JSON_PASS')
 PY
-
-rm -rf "$EVIDENCE_OUT"
-mkdir -p "$EVIDENCE_OUT"
-cp -f "$STATUS" "$EVIDENCE_OUT/runtime-status.json"
-cp -f "$LOG" "$EVIDENCE_OUT/runtime.log"
-cp -f "$WORK/kvm-preflight.stderr" "$EVIDENCE_OUT/kvm-preflight.stderr"
-for f in turbo-kernel.elf turbo-vmm.elf turbo-block-device.img; do
-  [[ -f "$BUILD/$f" ]] && cp -f "$BUILD/$f" "$EVIDENCE_OUT/$f"
-done
-(
-  cd "$EVIDENCE_OUT"
-  sha256sum ./* > SHA256SUMS
-)
 
 echo "TURBO_V37_LOCAL_HARDWARE_RUNTIME_PASS backend=$BACKEND evidence=$EVIDENCE_OUT"
