@@ -3,11 +3,19 @@ set -euo pipefail
 
 ORIG_PWD="$PWD"
 ARCHIVE="${1:-/opt/turbo/TURBO_META_OS_v37_RUNTIME_QUALIFICATION_RC_FULL.zip}"
-BACKEND="${2:-auto}"
+REQUESTED_BACKEND="${2:-auto}"
+BACKEND="$REQUESTED_BACKEND"
 TIMEOUT_SECONDS="${3:-180}"
 EXPECTED_SHA="5f14f0259699472d90735e7d973e30e060f265ae14f7a58ecd419eca972f6faf"
+EVIDENCE_OUT="${TURBO_V37_EVIDENCE_OUT:-$ORIG_PWD/v37-runtime-evidence-${REQUESTED_BACKEND}}"
+mkdir -p "$EVIDENCE_OUT"
 
-fail() { echo "TURBO_V37_LOCAL_QUALIFICATION_FAIL reason=$1" >&2; exit 1; }
+fail() {
+  local reason="$1"
+  echo "TURBO_V37_LOCAL_QUALIFICATION_FAIL reason=$reason" >&2
+  printf '%s\n' "$reason" > "$EVIDENCE_OUT/failure-reason.txt" 2>/dev/null || true
+  exit 1
+}
 need() { command -v "$1" >/dev/null 2>&1 || fail "missing_tool:$1"; }
 
 need sha256sum
@@ -53,15 +61,23 @@ case "$BACKEND" in
   *) fail "invalid_backend:$BACKEND" ;;
 esac
 
-EVIDENCE_OUT="${TURBO_V37_EVIDENCE_OUT:-$ORIG_PWD/v37-runtime-evidence-${BACKEND}}"
+# Local `auto` runs get a backend-specific evidence directory after detection.
+if [[ -z "${TURBO_V37_EVIDENCE_OUT:-}" && "$REQUESTED_BACKEND" == auto ]]; then
+  AUTO_EVIDENCE="$ORIG_PWD/v37-runtime-evidence-${BACKEND}"
+  if [[ "$AUTO_EVIDENCE" != "$EVIDENCE_OUT" ]]; then
+    rm -rf "$AUTO_EVIDENCE"
+    mv "$EVIDENCE_OUT" "$AUTO_EVIDENCE" 2>/dev/null || { mkdir -p "$AUTO_EVIDENCE"; rm -rf "$EVIDENCE_OUT"; }
+    EVIDENCE_OUT="$AUTO_EVIDENCE"
+  fi
+fi
+
 WORK="${TURBO_V37_WORK:-$(mktemp -d -t turbo-v37-qualify.XXXXXX)}"
 KEEP_WORK="${TURBO_V37_KEEP_WORK:-0}"
 SRC="$WORK/source"
 BUILD="$WORK/build"
 STATUS="$WORK/runtime-status.json"
 mkdir -p "$SRC" "$BUILD"
-rm -rf "$EVIDENCE_OUT"
-mkdir -p "$EVIDENCE_OUT"
+rm -f "$EVIDENCE_OUT"/qualification-exit-code.txt "$EVIDENCE_OUT"/SHA256SUMS
 
 finalize() {
   rc=$?
@@ -97,6 +113,7 @@ finalize() {
 trap finalize EXIT
 
 {
+  echo "requested_backend=$REQUESTED_BACKEND"
   echo "backend=$BACKEND"
   echo "mode=$MODE"
   echo "archive=$ARCHIVE"
