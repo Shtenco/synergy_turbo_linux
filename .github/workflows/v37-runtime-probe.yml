@@ -1,11 +1,6 @@
 name: TURBO v37 Runtime Environment Probe
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/v37-runtime-probe.yml'
-      - 'v37-runtime/**'
   workflow_dispatch:
 
 permissions:
@@ -52,9 +47,8 @@ jobs:
           } | tee runtime-evidence/environment.txt
 
           python3 - <<'PY' | tee runtime-evidence/status.json
-          import json, pathlib, re, subprocess
-          text=pathlib.Path('runtime-evidence/environment.txt').read_text(errors='replace')
-          flags=''
+          import json, pathlib
+          flags=[]
           for line in pathlib.Path('/proc/cpuinfo').read_text(errors='ignore').splitlines():
               if line.startswith(('flags','Features')) and ':' in line:
                   flags=line.split(':',1)[1].strip().split(); break
@@ -93,7 +87,6 @@ jobs:
             set -e
             echo "$rc" > runtime-evidence/kvm-smoke.rc
             cat runtime-evidence/kvm-smoke.stderr || true
-            # timeout=124 means QEMU initialized and sat paused as expected.
             if [[ $rc -eq 124 ]]; then
               echo 'TURBO_V37_GITHUB_KVM_INIT_PASS' | tee runtime-evidence/kvm-marker.txt
             else
