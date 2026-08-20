@@ -41,14 +41,14 @@ case "$BACKEND" in
     test -r /sys/module/kvm_intel/parameters/nested || fail kvm_intel_nested_status_missing
     grep -Eiq '^(Y|1)$' /sys/module/kvm_intel/parameters/nested || fail kvm_intel_nested_disabled
     MODE=kvm-intel
-    BACKEND_MARKER=TURBO_V37_VMX_RUNTIME_AVAILABLE
+    BACKEND_MARKER=TURBO_V37_VMX_EPT_AVAILABLE
     ;;
   amd)
     grep -qw svm <<<"$FLAGS" || fail svm_flag_missing
     test -r /sys/module/kvm_amd/parameters/nested || fail kvm_amd_nested_status_missing
     grep -Eiq '^(Y|1)$' /sys/module/kvm_amd/parameters/nested || fail kvm_amd_nested_disabled
     MODE=kvm-amd
-    BACKEND_MARKER=TURBO_V37_SVM_RUNTIME_AVAILABLE
+    BACKEND_MARKER=TURBO_V37_SVM_NPT_AVAILABLE
     ;;
   *) fail "invalid_backend:$BACKEND" ;;
 esac
@@ -106,7 +106,9 @@ grep -Fq TURBO_V37_LINUX_GUEST_BOOT_PASS "$LOG" || fail linux_boot_marker_missin
 grep -Fq TURBO_V37_NATIVE_PLUS_LINUX_BOOT_OBSERVED "$LOG" || fail native_parallel_marker_missing
 grep -Fq "$BACKEND_MARKER" "$LOG" || fail backend_runtime_marker_missing
 
-if grep -Eq 'TURBO_(PANIC|EXCEPTION)|TURBO_V37_(VMX|SVM)_ENTRY_FAIL' "$LOG"; then
+if grep -Fq '[TURBO PANIC]' "$LOG" || \
+   grep -Fq '[TURBO EXCEPTION]' "$LOG" || \
+   grep -Eq 'TURBO_V37_(VMX|SVM)_ENTRY_FAIL' "$LOG"; then
   fail panic_exception_or_vm_entry_failure_observed
 fi
 
