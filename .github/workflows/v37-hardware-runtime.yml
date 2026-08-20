@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       archive_path:
-        description: Absolute path to the exact v37 FULL ZIP preloaded on the self-hosted runner
+        description: Absolute path to exact v37 FULL ZIP preloaded on the self-hosted runner
         required: true
         default: /opt/turbo/TURBO_META_OS_v37_RUNTIME_QUALIFICATION_RC_FULL.zip
       timeout_seconds:
@@ -28,70 +28,14 @@ jobs:
       - name: Checkout qualification definitions
         uses: actions/checkout@v4
 
-      - name: Fail-closed Intel preflight
+      - name: Run exact fail-closed Intel qualification
         shell: bash
+        env:
+          TURBO_V37_EVIDENCE_OUT: ${{ runner.temp }}/v37-runtime-evidence-intel
         run: |
           set -euo pipefail
-          ARCHIVE='${{ inputs.archive_path }}'
-          test -f "$ARCHIVE"
-          echo '5f14f0259699472d90735e7d973e30e060f265ae14f7a58ecd419eca972f6faf  '"$ARCHIVE" | sha256sum -c -
-          test -c /dev/kvm
-          grep -qw vmx /proc/cpuinfo
-          test -r /sys/module/kvm_intel/parameters/nested
-          grep -Eiq '^(Y|1)$' /sys/module/kvm_intel/parameters/nested
-          command -v qemu-system-x86_64
-          qemu-system-x86_64 --version
-          echo TURBO_V37_INTEL_RUNNER_PREFLIGHT_PASS
-
-      - name: Extract exact v37 and verify source manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf "$RUNNER_TEMP/turbo-v37-intel"
-          mkdir -p "$RUNNER_TEMP/turbo-v37-intel"
-          unzip -q '${{ inputs.archive_path }}' -d "$RUNNER_TEMP/turbo-v37-intel"
-          ROOT="$(find "$RUNNER_TEMP/turbo-v37-intel" -mindepth 1 -maxdepth 1 -type d | head -n1)"
-          test -n "$ROOT"
-          cd "$ROOT"
-          sha256sum -c MANIFEST.sha256
-          printf '%s\n' "$ROOT" > "$RUNNER_TEMP/turbo-v37-intel.root"
-          echo TURBO_V37_EXACT_SOURCE_MANIFEST_PASS
-
-      - name: Build exact Intel runtime artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$(cat "$RUNNER_TEMP/turbo-v37-intel.root")"
-          cd "$ROOT"
-          export LC_ALL=C LANG=C TZ=UTC PYTHONHASHSEED=0 ZERO_AR_DATE=1 SOURCE_DATE_EPOCH=1700000000
-          make BUILD="$RUNNER_TEMP/build-v37-intel" test
-          make BUILD="$RUNNER_TEMP/build-v37-intel" sanitize
-          make BUILD="$RUNNER_TEMP/build-v37-intel" audit
-          make BUILD="$RUNNER_TEMP/build-v37-intel" qemu-loader block-device-image
-
-      - name: Real nested Intel VMX qualification
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$(cat "$RUNNER_TEMP/turbo-v37-intel.root")"
-          cd "$ROOT"
-          python3 scripts/runtime_qualify_v37.py \
-            --mode kvm-intel \
-            --build "$RUNNER_TEMP/build-v37-intel" \
-            --status "$RUNNER_TEMP/v37-intel-runtime.json" \
-            --timeout '${{ inputs.timeout_seconds }}' \
-            --skip-build --strict
-          grep -Fq TURBO_V37_LINUX_GUEST_BOOT_PASS "$RUNNER_TEMP/build-v37-intel/runtime-v37-kvm-intel.log"
-          grep -Fq TURBO_V37_NATIVE_PLUS_LINUX_BOOT_OBSERVED "$RUNNER_TEMP/build-v37-intel/runtime-v37-kvm-intel.log"
-          python3 - <<'PY'
-          import json, os
-          p=os.path.join(os.environ['RUNNER_TEMP'],'v37-intel-runtime.json')
-          d=json.load(open(p))
-          assert d['result']=='PASS', d
-          assert d['linux_boot_marker_observed'] is True, d
-          assert d['native_parallel_observed'] is True, d
-          print('TURBO_V37_INTEL_VMX_LINUX_RUNTIME_PASS')
-          PY
+          bash ci/v37/run_local_qualification.sh \
+            '${{ inputs.archive_path }}' intel '${{ inputs.timeout_seconds }}'
 
       - name: Upload Intel runtime evidence
         if: always()
@@ -99,12 +43,7 @@ jobs:
         with:
           name: turbo-v37-intel-vmx-runtime-evidence
           if-no-files-found: warn
-          path: |
-            ${{ runner.temp }}/v37-intel-runtime.json
-            ${{ runner.temp }}/build-v37-intel/runtime-v37-kvm-intel.log
-            ${{ runner.temp }}/build-v37-intel/turbo-kernel.elf
-            ${{ runner.temp }}/build-v37-intel/turbo-vmm.elf
-            ${{ runner.temp }}/build-v37-intel/turbo-block-device.img
+          path: ${{ runner.temp }}/v37-runtime-evidence-intel/
 
   amd-svm:
     name: AMD SVM/NPT + Linux guest
@@ -114,70 +53,14 @@ jobs:
       - name: Checkout qualification definitions
         uses: actions/checkout@v4
 
-      - name: Fail-closed AMD preflight
+      - name: Run exact fail-closed AMD qualification
         shell: bash
+        env:
+          TURBO_V37_EVIDENCE_OUT: ${{ runner.temp }}/v37-runtime-evidence-amd
         run: |
           set -euo pipefail
-          ARCHIVE='${{ inputs.archive_path }}'
-          test -f "$ARCHIVE"
-          echo '5f14f0259699472d90735e7d973e30e060f265ae14f7a58ecd419eca972f6faf  '"$ARCHIVE" | sha256sum -c -
-          test -c /dev/kvm
-          grep -qw svm /proc/cpuinfo
-          test -r /sys/module/kvm_amd/parameters/nested
-          grep -Eiq '^(Y|1)$' /sys/module/kvm_amd/parameters/nested
-          command -v qemu-system-x86_64
-          qemu-system-x86_64 --version
-          echo TURBO_V37_AMD_RUNNER_PREFLIGHT_PASS
-
-      - name: Extract exact v37 and verify source manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf "$RUNNER_TEMP/turbo-v37-amd"
-          mkdir -p "$RUNNER_TEMP/turbo-v37-amd"
-          unzip -q '${{ inputs.archive_path }}' -d "$RUNNER_TEMP/turbo-v37-amd"
-          ROOT="$(find "$RUNNER_TEMP/turbo-v37-amd" -mindepth 1 -maxdepth 1 -type d | head -n1)"
-          test -n "$ROOT"
-          cd "$ROOT"
-          sha256sum -c MANIFEST.sha256
-          printf '%s\n' "$ROOT" > "$RUNNER_TEMP/turbo-v37-amd.root"
-          echo TURBO_V37_EXACT_SOURCE_MANIFEST_PASS
-
-      - name: Build exact AMD runtime artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$(cat "$RUNNER_TEMP/turbo-v37-amd.root")"
-          cd "$ROOT"
-          export LC_ALL=C LANG=C TZ=UTC PYTHONHASHSEED=0 ZERO_AR_DATE=1 SOURCE_DATE_EPOCH=1700000000
-          make BUILD="$RUNNER_TEMP/build-v37-amd" test
-          make BUILD="$RUNNER_TEMP/build-v37-amd" sanitize
-          make BUILD="$RUNNER_TEMP/build-v37-amd" audit
-          make BUILD="$RUNNER_TEMP/build-v37-amd" qemu-loader block-device-image
-
-      - name: Real nested AMD SVM qualification
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$(cat "$RUNNER_TEMP/turbo-v37-amd.root")"
-          cd "$ROOT"
-          python3 scripts/runtime_qualify_v37.py \
-            --mode kvm-amd \
-            --build "$RUNNER_TEMP/build-v37-amd" \
-            --status "$RUNNER_TEMP/v37-amd-runtime.json" \
-            --timeout '${{ inputs.timeout_seconds }}' \
-            --skip-build --strict
-          grep -Fq TURBO_V37_LINUX_GUEST_BOOT_PASS "$RUNNER_TEMP/build-v37-amd/runtime-v37-kvm-amd.log"
-          grep -Fq TURBO_V37_NATIVE_PLUS_LINUX_BOOT_OBSERVED "$RUNNER_TEMP/build-v37-amd/runtime-v37-kvm-amd.log"
-          python3 - <<'PY'
-          import json, os
-          p=os.path.join(os.environ['RUNNER_TEMP'],'v37-amd-runtime.json')
-          d=json.load(open(p))
-          assert d['result']=='PASS', d
-          assert d['linux_boot_marker_observed'] is True, d
-          assert d['native_parallel_observed'] is True, d
-          print('TURBO_V37_AMD_SVM_LINUX_RUNTIME_PASS')
-          PY
+          bash ci/v37/run_local_qualification.sh \
+            '${{ inputs.archive_path }}' amd '${{ inputs.timeout_seconds }}'
 
       - name: Upload AMD runtime evidence
         if: always()
@@ -185,9 +68,4 @@ jobs:
         with:
           name: turbo-v37-amd-svm-runtime-evidence
           if-no-files-found: warn
-          path: |
-            ${{ runner.temp }}/v37-amd-runtime.json
-            ${{ runner.temp }}/build-v37-amd/runtime-v37-kvm-amd.log
-            ${{ runner.temp }}/build-v37-amd/turbo-kernel.elf
-            ${{ runner.temp }}/build-v37-amd/turbo-vmm.elf
-            ${{ runner.temp }}/build-v37-amd/turbo-block-device.img
+          path: ${{ runner.temp }}/v37-runtime-evidence-amd/
