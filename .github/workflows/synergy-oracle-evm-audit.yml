@@ -1,0 +1,34 @@
+name: SYNERGY Oracle EVM Audit
+
+on:
+  push:
+    branches:
+      - tmp-synergy-oracle-evm-audit-20260826
+  workflow_dispatch:
+
+jobs:
+  evm-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout isolated audit branch
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Show versions
+        run: |
+          forge --version
+          cast --version
+          anvil --version
+
+      - name: Compile
+        working-directory: synergy_oracle_evm
+        run: forge build -vv
+
+      - name: Run 100/500/1000-cycle EVM audit
+        working-directory: synergy_oracle_evm
+        run: forge test -vvvv
