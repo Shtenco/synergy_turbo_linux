@@ -1,0 +1,22 @@
+name: Meta-OS v38 MetaRAM MetaFS smoke
+
+on:
+  push:
+    branches:
+      - meta-os-v38-metaram-metafs-ip
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblz4-dev zlib1g-dev zstd
+          python -m pip install --upgrade pip
+          pip install pytest brotli zstandard lz4
+      - name: Build and exact smoke tests
+        run: |
+          pytest -q meta_os_v38/tests/test_meta_os_v38.py

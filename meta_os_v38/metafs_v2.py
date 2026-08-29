@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 """MetaFS-X v0.2: CDC dedup + solid superblocks + exact snapshots."""
 from __future__ import annotations
-import argparse,brotli,hashlib,json,lzma,os
+import argparse,brotli,hashlib,json,lzma,os,subprocess
 from pathlib import Path
-import zstandard as zstd
+try:
+    import zstandard as zstd
+except ImportError:
+    zstd=None
 
 MAGIC=b"MFSX2";SB_TARGET=1<<20
-_ZC=zstd.ZstdCompressor(level=19,write_checksum=False,write_content_size=True,write_dict_id=False)
-_ZD=zstd.ZstdDecompressor()
+if zstd is not None:
+    _ZC=zstd.ZstdCompressor(level=19,write_checksum=False,write_content_size=True,write_dict_id=False)
+    _ZD=zstd.ZstdDecompressor()
+    def zc(d): return _ZC.compress(d)
+    def zd(d): return _ZD.decompress(d)
+else:
+    _ZC=_ZD=None
+    def zc(d):
+        return subprocess.run(["zstd","-q","-19","-c"],input=d,stdout=subprocess.PIPE,check=True).stdout
+    def zd(d):
+        return subprocess.run(["zstd","-q","-d","-c"],input=d,stdout=subprocess.PIPE,check=True).stdout
 GEAR=[int.from_bytes(hashlib.sha256(b"metafs2-"+bytes([i])).digest()[:8],"little") for i in range(256)]
 MIN_CHUNK=4096;MASK=(1<<14)-1;MAX_CHUNK=65536
 ZSTD=1;BROTLI=2;XZ=3
@@ -36,10 +48,10 @@ def walk(root):
     for p in sorted(Path(root).rglob("*")):
         if p.is_file():yield p.relative_to(root).as_posix(),p
 def enc_sb(raw):
-    opts=[(ZSTD,_ZC.compress(raw)),(BROTLI,brotli.compress(raw,quality=11)),(XZ,lzma.compress(raw,format=lzma.FORMAT_XZ,preset=9|lzma.PRESET_EXTREME))]
+    opts=[(ZSTD,zc(raw)),(BROTLI,brotli.compress(raw,quality=11)),(XZ,lzma.compress(raw,format=lzma.FORMAT_XZ,preset=9|lzma.PRESET_EXTREME))]
     return min(opts,key=lambda x:(len(x[1]),x[0]))
 def dec_sb(codec,pay):
-    if codec==ZSTD:return _ZD.decompress(pay)
+    if codec==ZSTD:return zd(pay)
     if codec==BROTLI:return brotli.decompress(pay)
     if codec==XZ:return lzma.decompress(pay)
     raise ValueError("sb codec")
@@ -72,7 +84,7 @@ def pack_snapshots(snapshots,out_path):
     flush()
 
     meta={"version":2,"snapshots":man,"logical_bytes":logical,"chunk_refs":refs,"unique_chunks":len(chunks_raw),"superblocks":len(superblocks)}
-    mc=_ZC.compress(json.dumps(meta,separators=(",",":"),sort_keys=True).encode())
+    mc=zc(json.dumps(meta,separators=(",",":"),sort_keys=True).encode())
     o=bytearray(MAGIC)+uv(len(mc))+mc+uv(len(chunks_raw))
     for cid,(dg,q) in enumerate(chunks_raw):
         sid,off,n=loc[cid];o+=dg+uv(sid)+uv(off)+uv(n)
@@ -84,7 +96,7 @@ def pack_snapshots(snapshots,out_path):
 def read_image(path):
     b=Path(path).read_bytes()
     if b[:5]!=MAGIC or hashlib.sha256(b[:-32]).digest()!=b[-32:]:raise ValueError("image")
-    p=5;ml,p=rv(b,p);meta=json.loads(_ZD.decompress(b[p:p+ml]).decode());p+=ml
+    p=5;ml,p=rv(b,p);meta=json.loads(zd(b[p:p+ml]).decode());p+=ml
     nc,p=rv(b,p);idx=[]
     for _ in range(nc):
         dg=b[p:p+32];p+=32;sid,p=rv(b,p);off,p=rv(b,p);n,p=rv(b,p);idx.append((dg,sid,off,n))
