@@ -1,0 +1,8 @@
+{
+  "date": "2026-08-29",
+  "wave": "Meta-OS v38 storage wave 2",
+  "pager_ipc_median7": {"avg_roundtrip_us": 3.258056,"avg_service_us": 2.91692,"avg_decode_us": 2.768307,"end_to_end_mib_s": 1198.951,"repetitions": 7,"pages": 1135,"logical_bytes": 4648960,"physical_bytes": 1861559,"effective_ratio": 2.497348,"exact_all": true},
+  "userfaultfd": [{"mode":"raw","returncode":77,"stderr":"USERFAULTFD_UNAVAILABLE errno=38 (Function not implemented)"},{"mode":"metaram","returncode":77,"stderr":"USERFAULTFD_UNAVAILABLE errno=38 (Function not implemented)"}],
+  "metafs_v3_4snap": {"archive_bytes":1285067,"logical_bytes":24905499,"ratio":19.38070077280017,"unique_chunks":291,"chunk_refs":1067,"dedup_ref_fraction":0.7272727272727273,"superblocks":9,"dictionary_superblocks":0,"lineage_xor_superblocks":3,"exact_each":{"snap0":true,"snap1":true,"snap2":true,"snap3":true}},
+  "shared_cas_512pages": {"logical_snapshot_bytes":2097152,"standalone_metafs_bytes":352583,"fast":{"cas_physical_bytes":696358,"snapshot_image_bytes":35756,"combined_physical_bytes":732114,"incremental_snapshot_reduction_x":9.860806577916993,"incremental_snapshot_reduction_pct":89.8588417479005,"shared_total_reduction_pct_vs_duplicate":30.204463358758982,"exact":true},"compact":{"cas_physical_bytes":481525,"snapshot_image_bytes":35756,"combined_physical_bytes":517281,"incremental_snapshot_reduction_x":9.860806577916993,"shared_total_reduction_pct_vs_duplicate":37.98393013854321,"exact":true}}
+}

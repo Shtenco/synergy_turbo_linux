@@ -1,0 +1,23 @@
+name: Meta-OS v38 Wave2 pager MetaFS v3
+
+on:
+  push:
+    branches:
+      - meta-os-v38-metaram-metafs-ip
+  pull_request:
+
+jobs:
+  wave2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblz4-dev zlib1g-dev zstd
+          python -m pip install --upgrade pip
+          pip install pytest brotli zstandard lz4
+      - name: Build pager harnesses
+        run: make -C meta_os_v38 -f Makefile.wave2
+      - name: Wave2 exact tests
+        run: pytest -q meta_os_v38/tests/test_meta_os_v38_wave2.py

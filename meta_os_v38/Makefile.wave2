@@ -1,0 +1,15 @@
+CC ?= gcc
+CFLAGS ?= -O3 -march=native -std=c11 -Wall -Wextra -Werror
+LDLIBS += -llz4 -lz
+
+.PHONY: all clean
+all: metaram_ipc_bench_wave2 metaram_uffd_bench_wave2
+
+metaram_ipc_bench_wave2: src/metaram.c bench/metaram_ipc_pager.c include/metaram.h ../turbo_core/src/core.c ../turbo_core/include/turbo/core.h
+	$(CC) -Iinclude -I../turbo_core/include $(CFLAGS) src/metaram.c ../turbo_core/src/core.c bench/metaram_ipc_pager.c -o $@ $(LDLIBS) -pthread
+
+metaram_uffd_bench_wave2: src/metaram.c bench/metaram_userfaultfd.c include/metaram.h
+	$(CC) -Iinclude $(CFLAGS) src/metaram.c bench/metaram_userfaultfd.c -o $@ $(LDLIBS) -pthread
+
+clean:
+	rm -f metaram_ipc_bench_wave2 metaram_uffd_bench_wave2
