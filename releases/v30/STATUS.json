@@ -1,0 +1,69 @@
+{
+  "version": "v30 UNIFIED HHDM + MetaStorage RC",
+  "date": "2026-08-29",
+  "desktop_alpha": false,
+  "source_provenance": {
+    "v23_archive_sha256": "92d651ce62b7f3cb3ca3072c39b71e46cebb10676b3b875b3a2bdffd97c91800"
+  },
+  "implemented": {
+    "x86_64_kernel_build": "PASS",
+    "full_ram_sparse_pmm": "128 GiB",
+    "hhdm_base": "0xFFFF800000000000",
+    "service_cells": 6,
+    "dynamic_app_domains": 64,
+    "dynamic_domain_full_capacity_test": "PASS",
+    "stale_handle_generation_test": "PASS",
+    "strict_elf64_wx": "PASS",
+    "vtd_msix_dma_model": "PASS",
+    "driver_plane_10000_restart_cycles": "PASS",
+    "storage_power_cut_model_10000": "PASS",
+    "network_malformed_mutations": 100000,
+    "network_queue_frames": 200000,
+    "tls13_openssl_handshake": "PASS",
+    "metaram_ring3_ipc_pager": "PASS",
+    "metafs_v3": "PASS",
+    "shared_cas": "PASS",
+    "device_qualification_graph": "PASS",
+    "compositor_surface_contract": "PASS",
+    "uefi_ab_dev_bundle": "PASS",
+    "uefi_fat16_dev_esp": "PASS",
+    "asan_ubsan": "PASS",
+    "security_audit": "PASS"
+  },
+  "wave2_metrics": {
+    "pager_avg_roundtrip_us": 3.258056,
+    "pager_end_to_end_mib_s": 1198.951,
+    "metafs_4snap_ratio": 19.38070077280017,
+    "metafs_4snap_bytes": 1285067,
+    "shared_cas_incremental_reduction_x": 9.860806577916993
+  },
+  "artifacts": {
+    "BOOTX64.EFI": {"bytes": 12866, "sha256": "ee4b36e2b420476c6bd60bca7c09c3ec654ba0858c5376255aade0b23caf4f6c"},
+    "TURBO_META_OS_v30_DEV_ESP.img": {"bytes": 16777216, "sha256": "c0d24f23db5d9942b6c9c774c064914aaa1be6b5512f144f097b00d8a9988e7e"},
+    "turbo-compute.elf": {"bytes": 13552, "sha256": "c23bc91f4e15712d092956ec73a9bb226a3aa75996f2532be63b803b54ae047a"},
+    "turbo-device.elf": {"bytes": 61184, "sha256": "f45b2b67e934c26233d02027fab5ac9b84c94bd0402c8bcdcac6d6f430c9454b"},
+    "turbo-kernel-release.elf": {"bytes": 217000, "sha256": "6f4aee52ff025cf30975a84f00f33b20d0420697aa139b484c1bec881faf10e2"},
+    "turbo-kernel-uefi.elf": {"bytes": 218328, "sha256": "f9ed1f4a9ff9cecb27c312bc2d2a66aef3b4f75a79fc7903d4a3d530021e0554"},
+    "turbo-vfs.elf": {"bytes": 31248, "sha256": "b521f9b6ed523c6bf36cfe031c7dd2a88a8b451fb899f7868f755c3ad098b8ab"}
+  },
+  "not_run": [
+    "native x86_64 QEMU boot for v30: qemu-system-x86_64 absent in current environment",
+    "physical NVMe qualification",
+    "physical Ethernet qualification",
+    "native GPU scanout",
+    "physical xHCI USB",
+    "physical HDA audio",
+    "TPM/Secure-Boot production enrollment",
+    "production signing with external offline key",
+    "KASLR runtime qualification",
+    "8/24/72-hour physical endurance gates",
+    "500 physical power-cut gate",
+    "AArch64 v30 rebuild: cross compiler/zig absent"
+  ],
+  "known_limits": [
+    "MetaFS-X is immutable image/storage engine, not yet a mounted production VFS",
+    "desktop compositor is capability/lifecycle contract; physical GPU/input/audio are not qualified",
+    "test-only UEFI RSA key is forbidden for production",
+    "physical RAM/storage remain finite; temporal metadata is not free information capacity"
+  ]
+}
