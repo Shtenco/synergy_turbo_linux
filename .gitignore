@@ -1,0 +1,21 @@
+# Secret/private-key material must never be committed.
+*.ppk
+*.pem
+*.p12
+*.pfx
+*.key
+id_rsa
+id_rsa_*
+id_ed25519
+id_ed25519_*
+
+# Local environment/config secrets
+.env
+.env.*
+!.env.example
+
+# Common generated files
+__pycache__/
+*.pyc
+.venv/
+venv/
