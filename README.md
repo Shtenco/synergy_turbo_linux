@@ -100,3 +100,32 @@ flowchart LR
 README не должен утверждать больше, чем подтверждают код, тесты и сохранённые артефакты. Для рыночных/экономических проектов backtest или внутренняя переоценка не равны реализованной внешней прибыли; для AI/infra проектов benchmark или диаграмма не равны production-надежности.
 
 <!-- SYNERGY-FEDERATION-PASSPORT:END -->
+
+---
+
+# 🐧 Глубокий доказательный паспорт TURBO Core
+
+## Две разные линии в одном repo
+
+1. `turbo_core/` — активная clean-room kernel/core линия;
+2. старый Windows→VPS→KVM orchestrator — legacy infrastructure/hardware-lab path.
+
+```mermaid
+flowchart LR
+    CORE[turbo_core C/x86_64] --> TEST[Correctness tests]
+    CORE --> BENCH[Cycle benchmark]
+    BENCH --> CI[turbo-core-benchmark.yml]
+    LEGACY[Windows/VPS orchestrator] --> LAB[Remote hardware lab]
+```
+
+## Security hygiene finding
+
+В repository tree видны файлы `Linux Ubuntu.ppk` / `.pub`. Private SSH key material в Git является критическим риском независимо от того, действует ли ключ сейчас. Такой ключ следует считать скомпрометированным и заменить.
+
+## Performance rule
+
+Uplift принимается только для exact artifact + matched baseline + raw repeated samples + environment metadata.
+
+## Следующий рубеж
+
+rotate/remove committed credentials → CI artifact hashes → freestanding boot/runtime evidence → QEMU/hardware repeatability → Meta-OS host capability contract.
