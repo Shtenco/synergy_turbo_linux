@@ -1,166 +1,48 @@
-<div align="center">
+<img src="assets/readme/hero.svg" width="100%" alt="TURBO CORE / X86-64 FAST PATHS"/>
 
-<img src="assets/readme/hero.svg" width="100%" alt="TURBO / SYSTEMS RESEARCH project vector identity"/>
+# TURBO Core — x86-64 fast-path systems laboratory
 
-**Freestanding x86_64 core, low-level benchmarks and legacy Windows-to-VPS orchestration**
+A systems research platform focused on **bounded operations, explicit capability checks, fixed-capacity queues and repeatable timing experiments**. The contemporary turbo_core subtree is the central technical artifact; the Windows-to-VPS orchestration is a separate historical branch of investigation.
 
-[Overview](#engineering-overview) · [Architecture](#architecture-and-data-flow) · [Evidence](#validation-boundaries) · [Original technical dossier](#original-technical-dossier)
+## Scientific proposition
 
-</div>
+Low-level performance improvements should be associated with precisely defined operations and measured on the same processor under matched conditions. A capability primitive, scheduler and message queue can provide a small, testable systems foundation before claiming benefits at operating-system scale.
 
-## Engineering overview
+## Implemented fast paths
 
-Freestanding x86_64 core, low-level benchmarks and legacy Windows-to-VPS orchestration. Principal implementation directories and scripts: `turbo_core/; orchestrator.py; tests/`. The repository includes both implemented research artifacts and separately planned capabilities.
+The [turbo_core guide](turbo_core/README.md) documents a sealed capability issue/resolve design using keyed SipHash-2-4 and rights masks, an **O(1) bitmap-driven scheduler with 64 priority levels**, cacheline-separated SPSC ring IPC, and native x86-64 fast paths. The instruction-contract operations map to instructions or compiler primitives such as LFENCE, RDTSC/RDTSCP, PAUSE, REP MOVSB, REP STOSQ and bit scanning.
 
-## Architecture and data flow
+TURBO.X64 is a **software-level instruction contract**, not a claim to have created new physical processor opcodes. This interface could later be used by an emulator, FPGA soft core or CPU-specific backend while keeping kernel-facing API stable.
 
-```mermaid
-flowchart LR
- I[Source datasets and configuration] --> R[Research modules]
- R --> O[Outputs, evaluations and artifacts]
- O --> V[Independent validation required]
-```
+## Reproducible measurement
 
-This is an explanatory diagram, not a claim that every conceptual integration is deployed.
+The repository includes baseline and native optimized build variants, a freestanding compilation check, correctness tests and [run_bench.sh](turbo_core/scripts/run_bench.sh), which produces baseline.json, native.json and environment.txt. The latter records UTC time, kernel information, compiler and CPU identification.
 
-## Validation boundaries
+For matched median cycle measurements c(base) and c(native), the speed ratio and reduction are:
 
-> Repository lists Linux Ubuntu.ppk private key material: rotate/revoke immediately; never promote unverified performance uplift.
+$$
+S=\frac{c_{\mathrm{base}}}{c_{\mathrm{native}}},\qquad
+R=100\left(1-\frac{c_{\mathrm{native}}}{c_{\mathrm{base}}}\right)\%.
+$$
 
-Source availability, internal benchmarks and design goals must be distinguished from independently reproduced metrics and production readiness.
+Both denominators must be positive. These are **microbenchmark comparisons** and must not be presented as general Linux or datacenter acceleration.
 
-## Original technical dossier
+## Separate remote orchestration track
 
----
+The historical orchestrator installs KVM/build dependencies, retrieves kernel sources, applies a patch, performs runtime tuning and runs sysbench on a remote host. Applying a kernel source patch **without independently showing a reboot into the patched kernel** does not establish that the benchmark measured a patched kernel. This is a reason to maintain clear run manifests, not to dismiss the core research.
 
-# TURBO Core development
+## High-value applications
 
-The active clean-room kernel work now lives in [`turbo_core/`](turbo_core/).
-It contains x86_64 fast paths, a capability primitive, bounded IPC, an O(1)
-priority scheduler, freestanding compilation checks, correctness tests and a
-reproducible cycle benchmark. The legacy Linux/VPS experiment remains below as
-historical infrastructure and a future remote hardware-lab runner.
+Bounded IPC and capability semantics are relevant to embedded execution, real-time message passing, protected service boundaries and low-latency runtimes. The next technical programme is a freestanding page allocator, address spaces, Ring-3 transition, context-switch instrumentation and matched Linux reference workloads.
 
-> Performance rule: no uplift claim is accepted unless the exact artifact is
-> built, identified, executed, compared against a matched baseline, repeated,
-> and published with raw samples and environment metadata.
+## Execution
 
-# Turbo Linux Rebuild (Windows Orchestrator → VPS → KVM)
+On a compatible x86-64 Linux host:
 
-Проект пересобран с нуля под единый сценарий: **Windows Python оркестратор** подключается к VPS по SSH-ключу, готовит KVM окружение, применяет patch к kernel source и считает прирост производительности относительно baseline Linux профиля (2 GB RAM / 2 vCPU).
+    cd turbo_core
+    make test
+    ./scripts/run_bench.sh
 
-## Структура
-- `orchestrator.py` — точка запуска.
-- `turbo_orchestrator/config.py` — dataclass-конфиг.
-- `turbo_orchestrator/ssh_client.py` — SSH + поддержка PuTTY `.ppk`.
-- `turbo_orchestrator/workflow.py` — pipeline установки/патча/benchmark.
-- `config.example.json` — пример конфигурации.
-- `REBUILD_PLAN.md` — план пересборки и внедрения.
-- `virtual_qubit_turbo_5.15.patch` — patch, применяемый на VPS.
+The commands describe source-defined procedures, not results executed in this documentation session. Keep deploy keys outside source control. Any earlier tracked private SSH key should be replaced and revoked before a remote benchmark environment is reused.
 
-## Быстрый старт (Windows)
-```powershell
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-python orchestrator.py --config config.example.json
-```
-
-## Что делает оркестратор
-1. Подключается к VPS (`root@92.246.131.14`) по SSH-ключу из репозитория.
-2. Ставит пакеты для KVM и сборки ядра.
-3. Снимает baseline (`sysbench cpu --threads=2 --time=30`).
-4. Копирует patch на VPS и применяет к `linux-source`.
-5. Применяет runtime tuning (`sched_autogroup`, `swappiness`).
-6. Повторно запускает benchmark и считает `uplift_percent`.
-7. Сохраняет JSON-отчет в `results/`.
-
-## Примечания
-- Для `.ppk` нужен `puttygen` в PATH.
-- Скрипт рассчитан на Ubuntu 24.04 VPS.
-- Перед запуском проверьте, что ключи доступа актуальны.
-
-
-## Windows ошибка `FileNotFoundError: [WinError 2]` на `puttygen`
-Если при запуске возникает ошибка, что не найден `puttygen`, значит у вас есть только `.ppk` ключ и не установлен PuTTY Generator.
-
-Решение:
-```powershell
-winget install PuTTY.PuTTY
-# или
-choco install putty
-```
-
-Проверьте:
-```powershell
-puttygen --help
-```
-
-После этого снова выполните:
-```powershell
-python orchestrator.py --config config.example.json
-```
-
-
-<!-- SYNERGY-FEDERATION-PASSPORT:START -->
----
-
-##  SYNERGY federation passport
-
-**Домен:**  Host OS / runtime substrate  
-**Архитектурный родитель:** [`synergy_meta_os`](https://github.com/Shtenco/synergy_meta_os)  
-**Архитектурный корень:** [`synergy_system`](https://github.com/Shtenco/synergy_system)
-
-```mermaid
-flowchart LR
-    SYS[ synergy_system] --> P[synergy_meta_os]
-    P --> THIS[synergy_turbo_linux]
-    THIS --> E[ Evidence / outputs]
-```
-
-Связь выше показывает место в федерации и **не является доказательством runtime dependency**. Фактические зависимости должны подтверждаться импортами, API-контрактами, manifests, deployment-конфигурацией или тестами.
-
-### Единая шкала доказательности
-
-`GREEN` = воспроизводимо подтверждено · `CANDIDATE` = реализация есть, доказательство неполное · `R&D` = эксперимент · `STUB` = архитектурный узел · `LEGACY` = provenance.
-
-### Навигация
-
-- [ Атлас всех 75 репозиториев](https://github.com/Shtenco/synergy_system/blob/main/docs/SYNERGY_REPOSITORY_ATLAS.md)
-- [ Машиночитаемый registry](https://github.com/Shtenco/synergy_system/blob/main/registry/SYNERGY_REPOSITORIES.json)
-- [ SYNERGY SYSTEM](https://github.com/Shtenco/synergy_system)
-
-### Общее правило утверждений
-
-README не должен утверждать больше, чем подтверждают код, тесты и сохранённые артефакты. Для рыночных/экономических проектов backtest или внутренняя переоценка не равны реализованной внешней прибыли; для AI/infra проектов benchmark или диаграмма не равны production-надежности.
-
-<!-- SYNERGY-FEDERATION-PASSPORT:END -->
-
----
-
-#  Глубокий доказательный паспорт TURBO Core
-
-## Две разные линии в одном repo
-
-1. `turbo_core/` — активная clean-room kernel/core линия;
-2. старый Windows→VPS→KVM orchestrator — legacy infrastructure/hardware-lab path.
-
-```mermaid
-flowchart LR
-    CORE[turbo_core C/x86_64] --> TEST[Correctness tests]
-    CORE --> BENCH[Cycle benchmark]
-    BENCH --> CI[turbo-core-benchmark.yml]
-    LEGACY[Windows/VPS orchestrator] --> LAB[Remote hardware lab]
-```
-
-## Security hygiene finding
-
-В repository tree видны файлы `Linux Ubuntu.ppk` / `.pub`. Private SSH key material в Git является критическим риском независимо от того, действует ли ключ сейчас. Такой ключ следует считать скомпрометированным и заменить.
-
-## Performance rule
-
-Uplift принимается только для exact artifact + matched baseline + raw repeated samples + environment metadata.
-
-## Следующий рубеж
-
-rotate/remove committed credentials → CI artifact hashes → freestanding boot/runtime evidence → QEMU/hardware repeatability → Meta-OS host capability contract.
+[Core](turbo_core/) · [Benchmark runner](turbo_core/scripts/run_bench.sh) · [Rebuild plan](REBUILD_PLAN.md)
