@@ -1,3 +1,38 @@
+<div align="center">
+
+<img src="assets/readme/hero.svg" width="100%" alt="TURBO / SYSTEMS RESEARCH project vector identity"/>
+
+**Freestanding x86_64 core, low-level benchmarks and legacy Windows-to-VPS orchestration**
+
+[Overview](#engineering-overview) · [Architecture](#architecture-and-data-flow) · [Evidence](#validation-boundaries) · [Original technical dossier](#original-technical-dossier)
+
+</div>
+
+## Engineering overview
+
+Freestanding x86_64 core, low-level benchmarks and legacy Windows-to-VPS orchestration. Principal implementation directories and scripts: `turbo_core/; orchestrator.py; tests/`. The repository includes both implemented research artifacts and separately planned capabilities.
+
+## Architecture and data flow
+
+```mermaid
+flowchart LR
+ I[Source datasets and configuration] --> R[Research modules]
+ R --> O[Outputs, evaluations and artifacts]
+ O --> V[Independent validation required]
+```
+
+This is an explanatory diagram, not a claim that every conceptual integration is deployed.
+
+## Validation boundaries
+
+> Repository lists Linux Ubuntu.ppk private key material: rotate/revoke immediately; never promote unverified performance uplift.
+
+Source availability, internal benchmarks and design goals must be distinguished from independently reproduced metrics and production readiness.
+
+## Original technical dossier
+
+---
+
 # TURBO Core development
 
 The active clean-room kernel work now lives in [`turbo_core/`](turbo_core/).
